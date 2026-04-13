@@ -1,0 +1,8 @@
+# Qwen2.5-Coder-7B-Instruct on 1 GPU
+PROFILE_NAME="qwen2.5-7b-tp1"
+MODEL="Qwen/Qwen2.5-Coder-7B-Instruct"
+MODEL_SHORT="qwen2.5-coder-7b"
+TP_SIZE=1
+MAX_MODEL_LEN=32768
+MAX_TOKENS=4096
+GPU_MEMORY_UTIL=0.90
