@@ -1,0 +1,4 @@
+[submodule "hf-mount"]
+	path = hf-mount
+	url = git@github.com:dacorvo/hf-mount.git
+	branch = feat/overlay-mode
