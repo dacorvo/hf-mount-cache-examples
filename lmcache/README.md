@@ -63,12 +63,16 @@ Select via `--profile <name>` or `PROFILE=<name>`.
 
 ## Phases
 
-Each phase runs 3 multi-turn opencode conversations (5 turns each).
+Each phase runs 3 multi-turn opencode conversations. Each conversation
+grows the context through code generation prompts until it reaches 90%
+of the model's max context length (triggering opencode's compaction),
+then runs 3 more turns to verify cache hits survive compaction.
 Warmup and consume use different topics to avoid biased cache hit rates.
 
 | Phase | Mount | Cache state | Purpose |
 |-------|-------|-------------|---------|
-| `local-cold` | none | empty | Cold start reference |
+| `baseline` | none | CPU only | Pure prefix cache reference |
+| `local-cold` | none | empty disk | Cold start with disk writes |
 | `local-warmup` | none | → warm | Populate local disk cache |
 | `local-warm` | none | warm | Warm local cache baseline |
 | `bucket-warmup` | read-write | → warm | Populate bucket cache |

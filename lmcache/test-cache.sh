@@ -231,6 +231,34 @@ cmd_bucket_overlay() {
   stop_hf_mount
 }
 
+cmd_baseline() {
+  log "=== baseline (profile: $PROFILE_NAME) ==="
+  stop_vllm
+  stop_hf_mount
+
+  local lmcache_cfg="$LOG_DIR/lmcache_config_baseline.yaml"
+  cat > "$lmcache_cfg" <<EOF
+chunk_size: 256
+local_cpu: true
+max_local_cpu_size: 5.0
+EOF
+  start_vllm "$lmcache_cfg"
+  generate_opencode_json
+
+  local t0 t1
+  t0=$(date +%s)
+  conversations_consume
+  t1=$(date +%s)
+  local elapsed=$(( t1 - t0 ))
+
+  log "Baseline complete. Elapsed: ${elapsed}s"
+  print_cache_stats "baseline"
+  save_summary "baseline" "$elapsed"
+
+  stop_vllm
+  stop_hf_mount
+}
+
 cmd_local_cold() {
   log "=== local-cold (profile: $PROFILE_NAME) ==="
   stop_vllm
@@ -442,7 +470,7 @@ if files:
 # ── Batch commands ────────────────────────────────────────────────────
 
 cmd_run_all() {
-  for phase in local-cold local-warmup local-warm bucket-warmup bucket-rw bucket-overlay; do
+  for phase in baseline local-cold local-warmup local-warm bucket-warmup bucket-rw bucket-overlay; do
     log "====== Phase: $phase (profile: $PROFILE_NAME) ======"
     "cmd_${phase//-/_}"
   done
@@ -471,6 +499,7 @@ cmd_run_suite() {
 # ── Main dispatch ───────────────────────────────────────────────────────
 
 case "${1:-help}" in
+  baseline)         cmd_baseline ;;
   local-cold)       cmd_local_cold ;;
   local-warmup)     cmd_local_warmup ;;
   local-warm)       cmd_local_warm ;;
@@ -494,8 +523,9 @@ $(for f in "$SCRIPT_DIR/profiles"/*.sh; do
     printf "  %-14s %s\n" "$name" "$desc"
   done)
 
-Phases (3 multi-turn conversations each, 5 turns per conversation):
+Phases (3 conversations each, adaptive turns until 90% context + 3 post-compaction):
 
+  baseline         CPU-only LMCache, no disk. Pure prefix cache reference.
   local-cold       No mount. Cold local disk reference timing.
   local-warmup     No mount. Populate local disk cache (warmup prompts).
   local-warm       No mount. Consume from warm local disk cache.
