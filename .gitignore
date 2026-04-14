@@ -2,3 +2,4 @@
 lmcache/logs/
 lmcache/opencode.json
 lmcache/cufile.log
+__pycache__/

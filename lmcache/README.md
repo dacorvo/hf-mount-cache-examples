@@ -57,13 +57,13 @@ limits. Profiles live in `profiles/`:
 | Profile | Model | TP | GPUs |
 |---------|-------|----|------|
 | `qwen2.5-7b-tp1` (default) | Qwen2.5-Coder-7B-Instruct | 1 | 1x A10 |
-| `qwen2.5-32b-tp4` | Qwen2.5-Coder-32B-Instruct | 4 | 4x A10 |
+| `qwen3-coder-30b-fp8-tp2` | Qwen3-Coder-30B-A3B-Instruct-FP8 | 2 | 2x A10 |
 
 Select via `--profile <name>` or `PROFILE=<name>`.
 
 ## Phases
 
-Each phase runs 3 multi-turn opencode conversations. Each conversation
+Each phase runs 6 multi-turn opencode conversations. Each conversation
 grows the context through code generation prompts until it reaches 90%
 of the model's max context length (triggering opencode's compaction),
 then runs 3 more turns to verify cache hits survive compaction.
@@ -120,10 +120,32 @@ lmcache/
     conversations.sh      # conversation runner + topic definitions
   profiles/
     qwen2.5-7b-tp1.sh             # Qwen2.5-Coder-7B, TP=1
-    qwen2.5-32b-tp4.sh            # Qwen2.5-Coder-32B, TP=4
+    qwen3-coder-30b-fp8-tp2.sh    # Qwen3-Coder-30B-FP8, TP=2
   logs/<profile>/         # per-profile logs and summaries (gitignored)
   opencode.json           # generated at runtime (gitignored)
 ```
+
+## Model compatibility
+
+LMCache uses vLLM's `--kv-transfer-config` to intercept KV cache
+operations. This **disables the hybrid KV cache manager**, which means
+models using hybrid attention architectures (e.g. GatedDeltaNet +
+standard attention) are incompatible.
+
+| Architecture | Example models | LMCache compatible |
+|-------------|---------------|-------------------|
+| Standard attention (GQA/MHA) | Qwen2.5-Coder, Qwen3-Coder-30B | Yes |
+| Hybrid (GatedDeltaNet) | Qwen3.5, Qwen3-Coder-Next | **No** |
+
+See [LMCache#2845](https://github.com/LMCache/LMCache/issues/2845) and
+[vllm#36771](https://github.com/vllm-project/vllm/issues/36771) for
+details.
+
+Additionally, models must support tool calling via vLLM's
+`--tool-call-parser` for opencode to read files and interact with the
+codebase. Qwen2.5-Coder requires a
+[custom parser plugin](https://github.com/hanXen/vllm-qwen2.5-coder-tool-parser);
+Qwen3-Coder uses `qwen3_xml` natively.
 
 ## Configuration
 
