@@ -26,6 +26,11 @@ if ! command -v mount.nfs &>/dev/null; then
   sudo apt-get install -y nfs-common
 fi
 
+if ! command -v process-compose &>/dev/null; then
+  log "Installing process-compose..."
+  curl -fsSL https://raw.githubusercontent.com/F1bonacc1/process-compose/main/scripts/get-pc.sh | sh
+fi
+
 # ── 1. hf-mount submodule + build ────────────────────────────────────
 
 log "Initializing hf-mount submodule..."

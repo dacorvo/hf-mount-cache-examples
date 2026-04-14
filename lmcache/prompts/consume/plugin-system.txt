@@ -1,0 +1,21 @@
+Read the project source code and identify extension points. Write a complete plugin system in Rust that allows loading dynamic libraries (.so) at runtime to extend the filesystem with custom backends.
+---
+Write a plugin API with versioned traits: StoragePlugin, CachePlugin, and AuthPlugin. Include backward compatibility guarantees and a negotiation protocol.
+---
+Write a plugin manager that handles: discovery (scan a directory), loading (dlopen), initialization, dependency resolution, and graceful unloading.
+---
+Write three example plugins: a logging plugin that traces all filesystem operations, a compression plugin that transparently compresses cached files, and a quota plugin that enforces per-user storage limits.
+---
+Write comprehensive tests for the plugin system including: version mismatch handling, plugin crashes, circular dependencies, and hot-reload.
+---
+Write a plugin sandboxing system that restricts plugins to specific filesystem operations and prevents them from accessing files outside their designated scope.
+---
+Write a plugin marketplace specification: manifest format, versioning, dependency declaration, and installation protocol.
+---
+Write a complete developer guide for plugin authors: API reference, lifecycle hooks, debugging tips, and example project template.
+===
+What is the most dangerous thing a malicious plugin could do?
+---
+List the trait methods each plugin type must implement.
+---
+Describe the plugin lifecycle from discovery to unloading.

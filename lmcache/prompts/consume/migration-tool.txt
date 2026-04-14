@@ -1,0 +1,21 @@
+Write a complete data migration tool in Rust that moves files between HuggingFace buckets with progress reporting, checksums, and resume support.
+---
+Add parallel transfer support with configurable concurrency. Implement work-stealing across transfer threads for optimal throughput.
+---
+Write a dry-run mode that shows what would be transferred without actually moving data. Include a diff report showing new, modified, and deleted files.
+---
+Write a schedule system that can run migrations at specified times with retry logic and email/webhook notifications on completion or failure.
+---
+Write an integration test suite that creates temporary buckets, migrates data, and verifies integrity.
+---
+Write a conflict resolution system for migrations: detect conflicting files at the destination, offer merge strategies (overwrite, skip, rename), and generate conflict reports.
+---
+Write a bandwidth throttling system for migrations that limits transfer speed to avoid saturating network links, with configurable schedules.
+---
+Write a migration audit trail that records every file transferred, skipped, or failed, with checksums and timestamps, exportable as CSV.
+===
+What is the safest way to handle a migration that fails halfway through?
+---
+List all the CLI flags the migration tool accepts.
+---
+Describe the resume mechanism: what state is persisted and where.

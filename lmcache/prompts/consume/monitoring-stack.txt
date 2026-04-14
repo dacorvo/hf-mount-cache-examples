@@ -1,0 +1,21 @@
+Write a complete monitoring stack for hf-mount deployments: a Prometheus exporter that collects mount health, I/O throughput, cache hit rates, and error counts from all running mounts on a machine.
+---
+Write alerting rules for Prometheus that detect: mount failures, degraded performance, disk space exhaustion, and token expiry.
+---
+Write a Grafana dashboard in JSON that visualizes: mount status, throughput over time, cache hit ratio, and error rate. Include variable selectors for filtering by mount point.
+---
+Write a log aggregation pipeline using fluentd that collects hf-mount logs, parses structured fields, and forwards to Elasticsearch with proper index templates.
+---
+Write runbooks for the three most common operational issues: mount won't start, slow reads, and cache corruption.
+---
+Write an SLO definition for hf-mount availability and performance: target percentiles, error budgets, and burn rate alerts.
+---
+Write a capacity planning model that predicts storage and bandwidth requirements based on mount count, file sizes, and access patterns.
+---
+Write an incident response playbook for hf-mount outages: detection, triage, mitigation, and post-mortem template.
+===
+What single metric would you alert on first and at what threshold?
+---
+List all the Prometheus metrics the exporter exposes.
+---
+Describe the escalation path for a mount failure alert.

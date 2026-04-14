@@ -25,7 +25,7 @@ start_hf_mount() {
     --cache-dir "$CACHE_DIR" \
     "$@" \
     bucket "$BUCKET" "$MOUNT_POINT" \
-    > >(tee -a "$LOG_DIR/hf-mount.log") 2>&1 &
+    >> "$LOG_DIR/hf-mount.log" 2>&1 &
 
   local pid=$!
   echo "$pid" > "$LOG_DIR/hf-mount.pid"

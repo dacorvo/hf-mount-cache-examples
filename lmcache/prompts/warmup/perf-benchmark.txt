@@ -1,0 +1,21 @@
+Read the project source code. Write a complete benchmarking framework in Rust using criterion that measures: mount latency, file read throughput, write throughput, metadata operation latency, and concurrent access scalability.
+---
+Write a load generator that simulates realistic workloads: sequential large file reads, random small file reads, burst writes, and mixed read-write patterns.
+---
+Write a comparison benchmark that runs the same workload against: local filesystem, NFS mount, FUSE mount, and overlay mount. Generate a markdown report with tables.
+---
+Write a regression test that compares current performance against stored baselines and flags any degradation beyond configurable thresholds.
+---
+Write a CI integration that runs the benchmarks on every PR and posts a performance summary as a PR comment.
+---
+Write a statistical analysis module that computes confidence intervals, detects outliers, and generates publication-quality charts using plotters.
+---
+Write a profiling integration that captures flamegraphs during benchmark runs and identifies the top 10 hotspots.
+---
+Write a capacity planning tool that extrapolates benchmark results to predict performance at different scales (more files, larger files, more concurrent users).
+===
+Which metric is most important for the overlay use case and why?
+---
+What is the minimum number of benchmark iterations needed for statistical significance?
+---
+List all environment variables that affect benchmark behavior.

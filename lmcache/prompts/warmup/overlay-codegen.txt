@@ -1,0 +1,21 @@
+Read ../hf-mount/src/setup.rs and ../hf-mount/src/virtual_fs/mod.rs. Write a complete Rust module that implements a standalone overlay filesystem library extracted from this codebase, with full doc comments.
+---
+Add comprehensive error handling to the module you just wrote. Every public function should return a Result with a custom OverlayError enum. Write the full updated code.
+---
+Write a complete test module for the overlay library with at least 10 unit tests covering: reads, writes, deletes, renames, directory operations, and conflict resolution.
+---
+Read ../hf-mount/src/test_mocks.rs. Write a mock filesystem backend for the overlay library that implements all the traits needed for testing, with configurable failure injection.
+---
+Write a CLI binary that uses the overlay library to mount a directory with overlay semantics. Include argument parsing with clap, signal handling, and graceful shutdown.
+---
+Write a complete README.md for the overlay library with: overview, installation, usage examples, API reference, architecture diagram in ASCII, and contributing guide.
+---
+Refactor all the code above to use async/await throughout. Write the full updated implementation of every module.
+---
+Write a CHANGELOG.md and a migration guide for users moving from the old inline overlay code to the new library.
+===
+Summarize the key design decisions in the overlay library in 3 bullet points.
+---
+What is the single most important test case you wrote and why?
+---
+List the public API surface of the overlay library: function signatures only.
