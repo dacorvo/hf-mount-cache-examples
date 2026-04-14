@@ -53,7 +53,7 @@ if [ -z "${HF_TOKEN:-}" ]; then
   export HF_TOKEN="$(cat ~/.cache/huggingface/token 2>/dev/null)"
 fi
 
-# Export profile vars for generate-phase.sh.
+# Export profile vars for generate-phase.py.
 export MODEL VLLM_PORT MAX_MODEL_LEN GPU_MEMORY_UTIL TOOL_CALL_PARSER
 export SCRIPT_DIR LOG_DIR VLLM_URL MOUNT_POINT PROFILE_NAME
 export HF_MOUNT_BIN BUCKET HF_MOUNT_CACHE_DIR
@@ -142,7 +142,7 @@ run_phase() {
   export PHASE="$phase"
   export CACHE_DIR="${CACHE_DIR_OVERRIDE:-$MOUNT_POINT}"
 
-  bash "$SCRIPT_DIR/lib/generate-phase.sh" "${gen_flags[@]}" "$phase" "$prompt_dir" "$yaml"
+  python3 "$SCRIPT_DIR/lib/generate-phase.py" "${gen_flags[@]}" "$phase" "$prompt_dir" "$yaml"
 
   local t0 t1
   t0=$(date +%s)

@@ -1,0 +1,76 @@
+version: "0.5"
+log_location: "{{ log_dir }}/session.log"
+log_level: info
+
+environment:
+  - "SCRIPT_DIR={{ script_dir }}"
+  - "LOG_DIR={{ log_dir }}"
+  - "MAX_MODEL_LEN={{ max_model_len }}"
+  - "VLLM_URL={{ vllm_url }}"
+  - "VIRTUAL_ENV={{ virtual_env }}"
+  - "PATH={{ virtual_env }}/bin:${PATH}"
+  - "HF_TOKEN={{ hf_token }}"
+
+processes:
+
+{% if mount_mode %}
+  hf-mount:
+    command: "{{ hf_mount_bin }} --hf-token {{ hf_token }} --cache-dir {{ hf_mount_cache_dir }}{{ ' --overlay' if mount_mode == 'overlay' else '' }} bucket {{ bucket }} {{ mount_point }}"
+    environment:
+      - "RUST_LOG=hf_mount=info"
+    log_location: "{{ log_dir }}/hf-mount.log"
+    ready_log_line: "listening on"
+    shutdown:
+      signal: 15
+      timeout_seconds: 30
+
+{% endif %}
+  vllm:
+    command: {{ vllm_command | tojson }}
+    environment:
+      - "LMCACHE_CONFIG_FILE={{ lmcache_config_file }}"
+      - "PYTHONHASHSEED=0"
+    log_location: "{{ log_dir }}/vllm.log"
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: {{ vllm_port }}
+        path: /v1/models
+      period_seconds: 5
+      failure_threshold: 120
+    shutdown:
+      signal: 15
+      timeout_seconds: 15
+{% if mount_mode %}
+    depends_on:
+      hf-mount:
+        condition: process_log_ready
+{% endif %}
+
+{% for conv in conversations %}
+  conv-{{ conv.name }}:
+    command: "{{ script_dir }}/lib/run-conversation.sh {{ conv.file }}"
+    working_dir: "{{ script_dir }}"
+    log_location: "{{ log_dir }}/conv-{{ conv.name }}.log"
+    depends_on:
+      vllm:
+        condition: process_healthy
+
+{% endfor %}
+  summary:
+    command: >
+      bash -c '
+        source {{ script_dir }}/lib/helpers.sh;
+        VLLM_URL={{ vllm_url }};
+        LOG_DIR={{ log_dir }};
+        MOUNT_POINT={{ mount_point }};
+        PROFILE_NAME={{ profile_name }};
+        save_summary "{{ phase }}" "" "{{ cache_dir }}"
+      '
+    depends_on:
+{% for conv in conversations %}
+      conv-{{ conv.name }}:
+        condition: process_completed
+{% endfor %}
+    availability:
+      exit_on_end: true
