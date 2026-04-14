@@ -1,29 +1,36 @@
 # vllm.sh — start/stop vLLM with LMCache and TP support
 #
 # Expected globals: MODEL, VLLM_PORT, VLLM_URL, MAX_MODEL_LEN,
-#   GPU_MEMORY_UTIL, TP_SIZE, LOG_DIR
+#   GPU_MEMORY_UTIL, TP_SIZE, TOOL_CALL_PARSER, TOOL_PARSER_PLUGIN,
+#   CHAT_TEMPLATE, LOG_DIR
 
 start_vllm() {
   local lmcache_cfg="${1:-$LOG_DIR/lmcache_config_bucket.yaml}"
   [ -f "$lmcache_cfg" ] || lmcache_cfg="$SCRIPT_DIR/lmcache_config_bucket.yaml"
 
-  local tp_args=()
+  local -a extra_args=()
   if [ "${TP_SIZE:-1}" -gt 1 ]; then
-    tp_args=(--tensor-parallel-size "$TP_SIZE")
+    extra_args+=(--tensor-parallel-size "$TP_SIZE")
+  fi
+  if [ -n "${TOOL_PARSER_PLUGIN:-}" ]; then
+    extra_args+=(--tool-parser-plugin "$TOOL_PARSER_PLUGIN")
+  fi
+  if [ -n "${CHAT_TEMPLATE:-}" ]; then
+    extra_args+=(--chat-template "$CHAT_TEMPLATE")
   fi
 
-  log "Starting vLLM on port $VLLM_PORT (model: $MODEL, TP=${TP_SIZE:-1})"
+  log "Starting vLLM on port $VLLM_PORT (model: $MODEL, TP=${TP_SIZE:-1}, parser=${TOOL_CALL_PARSER:-hermes})"
   LMCACHE_CONFIG_FILE="$lmcache_cfg" \
   PYTHONHASHSEED=0 \
     vllm serve "$MODEL" \
     --port "$VLLM_PORT" \
     --max-model-len "$MAX_MODEL_LEN" \
     --gpu-memory-utilization "${GPU_MEMORY_UTIL:-0.90}" \
-    "${tp_args[@]}" \
     --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}' \
     --enable-auto-tool-choice \
-    --tool-call-parser hermes \
-    > >(tee -a "$LOG_DIR/vllm.log") 2>&1 &
+    --tool-call-parser "${TOOL_CALL_PARSER:-hermes}" \
+    "${extra_args[@]}" \
+    >> "$LOG_DIR/vllm.log" 2>&1 &
 
   local pid=$!
   echo "$pid" > "$LOG_DIR/vllm.pid"

@@ -1,8 +1,0 @@
-# Qwen2.5-Coder-32B-Instruct on 4 GPUs
-PROFILE_NAME="qwen2.5-32b-tp4"
-MODEL="Qwen/Qwen2.5-Coder-32B-Instruct"
-MODEL_SHORT="qwen2.5-coder-32b"
-TP_SIZE=4
-MAX_MODEL_LEN=32768
-MAX_TOKENS=4096
-GPU_MEMORY_UTIL=0.95
