@@ -21,10 +21,9 @@ need() { command -v "$1" &>/dev/null || die "$1 not found – please install it 
 
 # ── 0. System dependencies ───────────────────────────────────────────
 
-if ! command -v mount.nfs &>/dev/null; then
-  log "Installing nfs-common..."
-  sudo apt-get install -y nfs-common
-fi
+log "Installing system dependencies..."
+sudo apt-get update -qq
+sudo apt-get install -y -qq nfs-common pkg-config libssl-dev python3-dev
 
 if ! command -v process-compose &>/dev/null; then
   log "Installing process-compose..."
