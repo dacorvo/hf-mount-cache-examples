@@ -56,7 +56,7 @@ print_cache_stats() {
 }
 
 clear_conv_stats() {
-  rm -f "$LOG_DIR"/conv-stats-*.txt
+  rm -f "$LOG_DIR"/conv-stats-*-"${PHASE}".txt
 }
 
 save_summary() {
@@ -86,7 +86,7 @@ save_summary() {
     # Aggregate per-conversation stats (turns, max_tokens, first-turn TTFT).
     local total_turns=0 overall_max_tokens=0
     local ttft_sum_first=0 ttft_count_first=0
-    for sf in "$LOG_DIR"/conv-stats-*.txt; do
+    for sf in "$LOG_DIR"/conv-stats-*-"${phase}".txt; do
       [ -f "$sf" ] || continue
       local turns=0 max_tokens=0 first_turn_ttft_ms=""
       eval "$(cat "$sf")"
@@ -101,12 +101,13 @@ save_summary() {
     # "Total tokens" is logged by EngineCore, not APIServer. Find the
     # EngineCore PID that corresponds to our APIServer session.
     local engine_pid=""
-    if [ -f "$LOG_DIR/vllm.log" ] && [ -n "$vllm_pid" ]; then
-      engine_pid=$(grep -o "EngineCore pid=[0-9]*" "$LOG_DIR/vllm.log" \
+    local vllm_log="$LOG_DIR/vllm-${phase}.log"
+    if [ -f "$vllm_log" ] && [ -n "$vllm_pid" ]; then
+      engine_pid=$(grep -o "EngineCore pid=[0-9]*" "$vllm_log" \
         | tail -1 | grep -o "[0-9]*")
     fi
     if [ -n "$engine_pid" ]; then
-      overall_max_tokens=$(grep "pid=$engine_pid" "$LOG_DIR/vllm.log" \
+      overall_max_tokens=$(grep "pid=$engine_pid" "$vllm_log" \
         | grep -o "Total tokens [0-9]*" \
         | awk '{if($3>m)m=$3} END{print m+0}')
     fi

@@ -1,5 +1,5 @@
 version: "0.5"
-log_location: "{{ log_dir }}/session.log"
+log_location: "{{ log_dir }}/session-{{ phase }}.log"
 log_level: info
 
 environment:
@@ -9,6 +9,7 @@ environment:
   - "VLLM_URL={{ vllm_url }}"
   - "VIRTUAL_ENV={{ virtual_env }}"
   - "PATH={{ virtual_env }}/bin:${PATH}"
+  - "PHASE={{ phase }}"
   - "HF_TOKEN={{ hf_token }}"
 
 processes:
@@ -18,7 +19,7 @@ processes:
     command: "{{ hf_mount_bin }} --hf-token {{ hf_token }} --cache-dir {{ hf_mount_cache_dir }}{{ ' --overlay' if mount_mode == 'overlay' else '' }} bucket {{ bucket }} {{ mount_point }}"
     environment:
       - "RUST_LOG=hf_mount=info"
-    log_location: "{{ log_dir }}/hf-mount.log"
+    log_location: "{{ log_dir }}/hf-mount-{{ phase }}.log"
     ready_log_line: "listening on"
     shutdown:
       signal: 15
@@ -30,7 +31,7 @@ processes:
     environment:
       - "LMCACHE_CONFIG_FILE={{ lmcache_config_file }}"
       - "PYTHONHASHSEED=0"
-    log_location: "{{ log_dir }}/vllm.log"
+    log_location: "{{ log_dir }}/vllm-{{ phase }}.log"
     readiness_probe:
       http_get:
         host: 127.0.0.1
@@ -51,7 +52,7 @@ processes:
   conv-{{ conv.name }}:
     command: "{{ script_dir }}/lib/run-conversation.sh {{ conv.file }}"
     working_dir: "{{ script_dir }}"
-    log_location: "{{ log_dir }}/conv-{{ conv.name }}.log"
+    log_location: "{{ log_dir }}/conv-{{ conv.name }}-{{ phase }}.log"
     depends_on:
       vllm:
         condition: process_healthy

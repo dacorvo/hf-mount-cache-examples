@@ -136,10 +136,9 @@ run_phase() {
   local yaml="$LOG_DIR/process-compose-${phase}.yaml"
 
   log "====== Phase: $phase (profile: $PROFILE_NAME) ======"
+  export PHASE="$phase"
   generate_opencode_json
   clear_conv_stats
-
-  export PHASE="$phase"
   export CACHE_DIR="${CACHE_DIR_OVERRIDE:-$MOUNT_POINT}"
 
   python3 "$SCRIPT_DIR/lib/generate-phase.py" "${gen_flags[@]}" "$phase" "$prompt_dir" "$yaml"

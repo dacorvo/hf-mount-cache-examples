@@ -15,8 +15,8 @@ set -euo pipefail
 PROMPT_FILE="$1"
 label=$(basename "$PROMPT_FILE" .txt)
 
-CONV_LOG="$LOG_DIR/conversation-${label}.log"
-STATS_FILE="$LOG_DIR/conv-stats-${label}.txt"
+CONV_LOG="$LOG_DIR/conversation-${label}-${PHASE}.log"
+STATS_FILE="$LOG_DIR/conv-stats-${label}-${PHASE}.txt"
 THRESHOLD=$(( MAX_MODEL_LEN * 9 / 10 ))
 
 log() { echo "[$(date '+%H:%M:%S')] [$label] $*"; }
