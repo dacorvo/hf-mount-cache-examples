@@ -109,7 +109,7 @@ write_lmcache_config() {
   cat > "$output" <<EOF
 chunk_size: 256
 local_cpu: true
-max_local_cpu_size: 5.0
+max_local_cpu_size: 15.0
 gds_path: "$gds_path"
 cufile_buffer_size: 512
 EOF
@@ -120,7 +120,7 @@ write_lmcache_config_cpuonly() {
   cat > "$output" <<EOF
 chunk_size: 256
 local_cpu: true
-max_local_cpu_size: 5.0
+max_local_cpu_size: 15.0
 EOF
 }
 
