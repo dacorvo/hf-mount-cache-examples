@@ -1,4 +1,4 @@
-Read ../hf-mount/src/setup.rs and the CLI argument parsing code. Write a complete configuration management library in Rust that merges config from: YAML files, environment variables, CLI flags, and defaults.
+Read src/setup.rs and the CLI argument parsing code. Write a complete configuration management library in Rust that merges config from: YAML files, environment variables, CLI flags, and defaults.
 ---
 Write a validation layer for the configuration library with custom validators, dependency checks between fields, and helpful error messages.
 ---

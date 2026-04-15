@@ -1,4 +1,4 @@
-Read ../hf-mount/src/xet.rs and ../hf-mount/src/virtual_fs/mod.rs. Design and write a complete Rust caching layer that sits between the virtual filesystem and the storage backend, with LRU eviction and configurable size limits.
+Read src/xet.rs and src/virtual_fs/mod.rs. Design and write a complete Rust caching layer that sits between the virtual filesystem and the storage backend, with LRU eviction and configurable size limits.
 ---
 Write the full implementation of the cache eviction policy. Support LRU, LFU, and FIFO strategies with a trait-based design. Include all three implementations.
 ---

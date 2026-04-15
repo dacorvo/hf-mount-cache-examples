@@ -1,4 +1,4 @@
-Read ../hf-mount/src/setup.rs and explain the FUSE mount setup. Then write a complete Rust implementation of a FUSE passthrough filesystem that mirrors a local directory with read-write support.
+Read src/setup.rs and explain the FUSE mount setup. Then write a complete Rust implementation of a FUSE passthrough filesystem that mirrors a local directory with read-write support.
 ---
 Add overlay semantics to the passthrough filesystem: reads check local first then remote, writes always go local. Write the full updated implementation.
 ---

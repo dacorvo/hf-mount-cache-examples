@@ -1,4 +1,4 @@
-Read ../hf-mount/src/virtual_fs/mod.rs and ../hf-mount/src/xet.rs. Write a complete streaming read implementation that serves file data as it is downloaded, without waiting for the full file to be cached locally.
+Read src/virtual_fs/mod.rs and src/xet.rs. Write a complete streaming read implementation that serves file data as it is downloaded, without waiting for the full file to be cached locally.
 ---
 Write a prefetch scheduler that predicts which files will be read next based on access patterns. Implement the full prediction logic and prefetch queue.
 ---

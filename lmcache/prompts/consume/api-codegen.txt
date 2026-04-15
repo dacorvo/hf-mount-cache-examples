@@ -1,4 +1,4 @@
-Read ../hf-mount/src/hub_api.rs or any HTTP client code in the project. Write a complete Rust HTTP API client library for HuggingFace Hub with typed request/response models for all bucket operations.
+Read src/hub_api.rs or any HTTP client code in the project. Write a complete Rust HTTP API client library for HuggingFace Hub with typed request/response models for all bucket operations.
 ---
 Add retry logic with exponential backoff, circuit breaker pattern, and request rate limiting to the API client. Write the full implementation.
 ---

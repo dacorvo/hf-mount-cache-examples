@@ -1,4 +1,4 @@
-Read ../hf-mount/src/bin/hf-mount-nfs.rs. Write a complete rewrite of the NFS server startup code with better error handling, structured logging, and graceful shutdown.
+Read src/bin/hf-mount-nfs.rs. Write a complete rewrite of the NFS server startup code with better error handling, structured logging, and graceful shutdown.
 ---
 Write a connection pool manager for the NFS server that handles multiple concurrent client connections with configurable limits and timeouts.
 ---

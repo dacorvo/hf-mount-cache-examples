@@ -24,6 +24,12 @@ THRESHOLD=$(( MAX_MODEL_LEN * 9 / 10 ))
 export XDG_DATA_HOME="$LOG_DIR/opencode-data-${label}"
 mkdir -p "$XDG_DATA_HOME"
 
+# Create a sandboxed working directory so opencode doesn't ingest
+# AGENTS.md, CLAUDE.md, or other files that bloat the system prompt.
+SANDBOX="$LOG_DIR/sandbox-${label}"
+git clone --depth 1 --single-branch "$SCRIPT_DIR/../hf-mount" "$SANDBOX" 2>/dev/null || true
+cp "$SCRIPT_DIR/opencode.json" "$SANDBOX/"
+
 log() { echo "[$(date '+%H:%M:%S')] [$label] $*"; }
 
 # Parse prompt file into grow and post arrays.
@@ -69,13 +75,13 @@ for prompt in "${grow_prompts[@]}"; do
   if [ "$turn" -eq 1 ]; then
     log "Turn $turn (grow)"
     t_start=$(date +%s%3N)
-    (cd "$SCRIPT_DIR" && opencode run "$prompt") >> "$CONV_LOG" 2>&1
+    (cd "$SANDBOX" && opencode run "$prompt") >> "$CONV_LOG" 2>&1
     t_end=$(date +%s%3N)
     first_turn_ttft_ms=$(( t_end - t_start ))
     log "First-turn wall time: ${first_turn_ttft_ms}ms"
   else
     log "Turn $turn (grow)"
-    (cd "$SCRIPT_DIR" && opencode run -c "$prompt") >> "$CONV_LOG" 2>&1
+    (cd "$SANDBOX" && opencode run -c "$prompt") >> "$CONV_LOG" 2>&1
   fi
 
   # Estimate token count from conversation log size (~4 chars/token).
@@ -94,7 +100,7 @@ done
 for prompt in "${post_prompts[@]}"; do
   turn=$((turn + 1))
   log "Turn $turn (post-compaction)"
-  (cd "$SCRIPT_DIR" && opencode run -c "$prompt") >> "$CONV_LOG" 2>&1
+  (cd "$SANDBOX" && opencode run -c "$prompt") >> "$CONV_LOG" 2>&1
 done
 
 # Write per-conversation stats.

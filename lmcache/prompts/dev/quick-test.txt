@@ -1,4 +1,4 @@
-Read ../hf-mount/src/setup.rs and explain the main struct and its fields.
+Read src/setup.rs and explain the main struct and its fields.
 ---
 Write a unit test for the struct you just described.
 ===
