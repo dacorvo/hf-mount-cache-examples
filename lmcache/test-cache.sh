@@ -284,21 +284,9 @@ cmd_status() {
 }
 
 cmd_teardown() {
-  # Send SIGTERM to hf-mount first and wait for clean unmount.
   # NEVER call umount on hf-mount — it corrupts NFS state and requires a reboot.
-  pkill -f "hf-mount-nfs.*$MOUNT_POINT" 2>/dev/null || true
-  if grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null; then
-    log "Waiting for hf-mount to unmount cleanly..."
-    for _ in $(seq 1 30); do
-      grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null || break
-      sleep 1
-    done
-    if grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null; then
-      log "WARNING: mount at $MOUNT_POINT still active after 30s"
-    fi
-  fi
-  pkill -f "vllm serve.*$VLLM_PORT" 2>/dev/null || true
-  pkill -f "opencode run" 2>/dev/null || true
+  # Use process-compose down for ordered shutdown (consumers → vllm → hf-mount).
+  "$PC_BIN" down --ordered-shutdown 2>/dev/null || true
   log "Teardown complete."
 }
 
