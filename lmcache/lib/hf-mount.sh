@@ -9,12 +9,22 @@ start_hf_mount() {
 
   mkdir -p "$MOUNT_POINT" "$CACHE_DIR" "$LOG_DIR"
 
-  if grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null; then
-    sudo umount "$MOUNT_POINT" 2>/dev/null || true
-    sleep 1
-  fi
+  # If a previous hf-mount is still running, stop it via SIGTERM.
+  # NEVER call umount — it corrupts NFS state and requires a reboot.
   if [ -f "$LOG_DIR/hf-mount.pid" ]; then
-    kill "$(cat "$LOG_DIR/hf-mount.pid")" 2>/dev/null || true
+    local old_pid
+    old_pid="$(cat "$LOG_DIR/hf-mount.pid")"
+    if kill -0 "$old_pid" 2>/dev/null; then
+      log "Stopping previous hf-mount (pid $old_pid) via SIGTERM"
+      kill "$old_pid" 2>/dev/null || true
+      for _ in $(seq 1 30); do
+        kill -0 "$old_pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$old_pid" 2>/dev/null; then
+        log "WARNING: hf-mount pid $old_pid still alive after 30s"
+      fi
+    fi
     rm -f "$LOG_DIR/hf-mount.pid"
   fi
 
@@ -45,17 +55,22 @@ start_hf_mount() {
 }
 
 stop_hf_mount() {
-  if grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null; then
-    sudo umount "$MOUNT_POINT" 2>/dev/null || true
-  fi
+  # Stop hf-mount via SIGTERM — it handles its own unmount cleanly.
+  # NEVER call umount — it corrupts NFS state and requires a reboot.
   if [ -f "$LOG_DIR/hf-mount.pid" ]; then
     local pid
     pid="$(cat "$LOG_DIR/hf-mount.pid")"
-    for _ in $(seq 1 60); do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 1
-    done
-    kill "$pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      log "Sending SIGTERM to hf-mount (pid $pid)"
+      kill "$pid" 2>/dev/null || true
+      for _ in $(seq 1 30); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        log "WARNING: hf-mount pid $pid still alive after 30s"
+      fi
+    fi
     rm -f "$LOG_DIR/hf-mount.pid"
   fi
   log "hf-mount stopped"
