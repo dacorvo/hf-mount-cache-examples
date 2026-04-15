@@ -2,3 +2,6 @@
 	path = hf-mount
 	url = git@github.com:dacorvo/hf-mount.git
 	branch = feat/overlay-mode
+[submodule "lmcache-src"]
+	path = lmcache-src
+	url = git@github.com:dacorvo/LMCache.git

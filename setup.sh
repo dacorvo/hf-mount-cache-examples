@@ -53,8 +53,12 @@ log "Creating venv at $VENV_DIR..."
 uv venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
-log "Installing vLLM..."
-uv pip install vllm
+log "Installing vLLM (nightly, Gemma4 support)..."
+uv pip install -U vllm --pre \
+  --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
+  --extra-index-url https://download.pytorch.org/whl/cu129 \
+  --index-strategy unsafe-best-match
+uv pip install transformers==5.5.0
 
 # ── 3. opencode ───────────────────────────────────────────────────────
 
