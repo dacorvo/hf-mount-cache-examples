@@ -53,6 +53,9 @@ if [ -z "${HF_TOKEN:-}" ]; then
   export HF_TOKEN="$(cat ~/.cache/huggingface/token 2>/dev/null)"
 fi
 
+# Opencode context limit (defaults to MAX_MODEL_LEN if not set by profile).
+export OPENCODE_CONTEXT="${OPENCODE_CONTEXT:-$MAX_MODEL_LEN}"
+
 # Export profile vars for generate-phase.py.
 export MODEL VLLM_PORT MAX_MODEL_LEN GPU_MEMORY_UTIL TOOL_CALL_PARSER
 export SCRIPT_DIR LOG_DIR VLLM_URL MOUNT_POINT PROFILE_NAME
@@ -89,12 +92,16 @@ generate_opencode_json() {
             "max_tokens": $MAX_TOKENS
           },
           "limit": {
-            "context": $MAX_MODEL_LEN,
+            "context": $OPENCODE_CONTEXT,
             "output": $MAX_TOKENS
           }
         }
       }
     }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true
   },
   "model": "local/$MODEL"
 }

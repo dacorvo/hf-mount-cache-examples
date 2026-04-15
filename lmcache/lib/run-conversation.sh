@@ -17,7 +17,7 @@ label=$(basename "$PROMPT_FILE" .txt)
 
 CONV_LOG="$LOG_DIR/conversation-${label}-${PHASE}.log"
 STATS_FILE="$LOG_DIR/conv-stats-${label}-${PHASE}.txt"
-THRESHOLD=$(( MAX_MODEL_LEN * 9 / 10 ))
+THRESHOLD=$(( ${OPENCODE_CONTEXT:-$MAX_MODEL_LEN} * 9 / 10 ))
 
 # Isolate each conversation's SQLite database to avoid WAL lock contention
 # when multiple opencode instances run in parallel.

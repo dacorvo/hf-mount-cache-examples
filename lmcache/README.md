@@ -57,7 +57,7 @@ limits. Profiles live in `profiles/`:
 | Profile | Model | TP | GPUs |
 |---------|-------|----|------|
 | `qwen2.5-7b-tp1` (default) | Qwen2.5-Coder-7B-Instruct | 1 | 1x A10 |
-| `qwen3-coder-30b-fp8-tp2` | Qwen3-Coder-30B-A3B-Instruct-FP8 | 2 | 2x A10 |
+| `qwen3-coder-30b-tp8` | Qwen3-Coder-30B-A3B-Instruct | 8 | 8x A10 |
 
 Select via `--profile <name>` or `PROFILE=<name>`.
 
@@ -120,7 +120,7 @@ lmcache/
     conversations.sh      # conversation runner + topic definitions
   profiles/
     qwen2.5-7b-tp1.sh             # Qwen2.5-Coder-7B, TP=1
-    qwen3-coder-30b-fp8-tp2.sh    # Qwen3-Coder-30B-FP8, TP=2
+    qwen3-coder-30b-tp8.sh        # Qwen3-Coder-30B (bf16), TP=8
   logs/<profile>/         # per-profile logs and summaries (gitignored)
   opencode.json           # generated at runtime (gitignored)
 ```
