@@ -24,7 +24,7 @@ fi
 
 # ── Profile loading ───────────────────────────────────────────────────
 
-PROFILE="${PROFILE:-qwen2.5-7b-tp1}"
+PROFILE="${PROFILE:-gemma4-e4b-tp1}"
 while [[ "${1:-}" == --* ]]; do
   case "$1" in
     --profile) PROFILE="$2"; shift 2 ;;
@@ -61,6 +61,8 @@ export VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 # Build extra vLLM args from profile.
 [ -n "${TOOL_PARSER_PLUGIN:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tool-parser-plugin $TOOL_PARSER_PLUGIN"
 [ -n "${CHAT_TEMPLATE:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --chat-template $CHAT_TEMPLATE"
+[ -n "${REASONING_PARSER:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --reasoning-parser $REASONING_PARSER"
+[ -n "${LIMIT_MM_PER_PROMPT:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --limit-mm-per-prompt '$LIMIT_MM_PER_PROMPT'"
 [ "${TP_SIZE:-1}" -gt 1 ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tensor-parallel-size $TP_SIZE"
 export VLLM_EXTRA_ARGS
 
@@ -145,7 +147,7 @@ run_phase() {
 
   local t0 t1
   t0=$(date +%s)
-  "$PC_BIN" up -f "$yaml" --tui=false
+  "$PC_BIN" up -f "$yaml" --tui=false --ordered-shutdown
   t1=$(date +%s)
   local elapsed=$(( t1 - t0 ))
 
@@ -371,7 +373,7 @@ case "${1:-help}" in
     cat <<EOF
 Usage: $(basename "$0") [--profile <name>] <command>
 
-Profiles (default: qwen2.5-7b-tp1):
+Profiles (default: gemma4-e4b-tp1):
 $(for f in "$SCRIPT_DIR/profiles"/*.sh; do
     name=$(basename "$f" .sh)
     desc=$(head -1 "$f" | sed 's/^# *//')
@@ -401,7 +403,7 @@ Utilities:
 Tip: attach to a running phase with: process-compose attach
 
 Environment:
-  PROFILE        Profile name              (default: qwen2.5-7b-tp1)
+  PROFILE        Profile name              (default: gemma4-e4b-tp1)
   MOUNT_POINT    Mount directory           (default: /tmp/hf-mount-lmcache)
   BUCKET         HuggingFace bucket ID     (default: dacorvo/lm-cache)
   VLLM_PORT      vLLM API port             (default: 8000)
