@@ -2,3 +2,7 @@
 	path = hf-mount
 	url = git@github.com:dacorvo/hf-mount.git
 	branch = feat/overlay-mode
+[submodule "reagent"]
+	path = reagent
+	url = git@github.com:huggingface/reagent.git
+	branch = main

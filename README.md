@@ -61,6 +61,13 @@ specific cache type.
 |-----------|-----------|-------|
 | [lmcache/](lmcache/) | KV cache | vLLM + LMCache + opencode |
 
+A related research harness lives in the [`reagent`](reagent/) submodule
+([github.com/huggingface/reagent](https://github.com/huggingface/reagent))
+— a position-drift diagnostic for reusing KV caches across agentic LLM
+prompts. It probes the model-side correctness of cross-prompt cache
+reuse; the tests in this repo exercise the serving-stack performance
+side of the same problem.
+
 ### Quick start
 
 ```bash
