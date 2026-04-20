@@ -62,6 +62,8 @@ export VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 [ -n "${TOOL_PARSER_PLUGIN:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tool-parser-plugin $TOOL_PARSER_PLUGIN"
 [ -n "${CHAT_TEMPLATE:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --chat-template $CHAT_TEMPLATE"
 [ "${TP_SIZE:-1}" -gt 1 ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tensor-parallel-size $TP_SIZE"
+# We run at most 6 parallel conversations — no need to warm up 256 sequences.
+VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --max-num-seqs 6"
 export VLLM_EXTRA_ARGS
 
 source "$SCRIPT_DIR/lib/helpers.sh"
