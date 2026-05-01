@@ -125,17 +125,116 @@ control:
   0.85 nf4, but both are well below the bit-exact threshold, so
   the qualitative outcome stands.
 
+## Phase 2.6 — scale-up (30 sessions)
+
+Re-ran the same protocol with 30 natural prompts on lmcache-src to
+get tighter statistics. Results (analysis_v2.json + splice_correctness.json
+in `runs/phase2_6-2026-05-01-1700/`):
+
+| metric | phase 2.5 | phase 2.6 |
+|---|---|---|
+| sessions captured | 15 (real agent) | ~27 (real agent, after machinery filter) |
+| ordered pairs | 105 | 465 |
+| pairs with body match | 3 / 105 (2.9%) | **11 / 465 (2.4%)** |
+| match sizes (median) | 497 tok | **2954 tok** |
+| match sizes (max) | 524 tok | 2954 tok |
+| splice correctness — sim mean | 0.95 (3 pairs) | **0.934 (11 pairs)** |
+| splice correctness — sim min | 0.85 | **0.877** |
+| **splice correctness — top-1 agreement** | 2/3 | **0/11** |
+| KL (mean across pairs) | mixed (~6) | **~12 nats (uniformly high)** |
+
+Two big shifts vs phase 2.5:
+
+1. **Larger matches.** Median match jumped from ~500 to ~2954 tokens.
+   This is the substrate body-splice was supposed to act on. The
+   2954-tok match recurred across multiple pair clusters — three
+   sessions about vLLM-integration / chunk-policy / Redis-serializer
+   all read the same large file (likely `lmcache/v1/cache_engine.py`).
+   *Now we're above the typical disk-cache load break-even.*
+
+2. **Splice correctness collapsed at this size.** 0 / 11 splice
+   pairs preserve the next-token argmax. KL is uniformly ~12 nats.
+   Sim mean 0.93 *looks* close but isn't telling the real story —
+   see caveat below.
+
+### Caveat: garbage-attractor mode collapse at 15k+ context
+
+Inspecting fresh vs reused texts on phase 2.6 pairs reveals both
+outputs are pseudo-refusal templates ("I do not have specific
+documentation on…", "<eos>The documentation for OpenCode does not
+contain…"). At 15k+ token contexts on Gemma-4 E4B (bf16 +
+chunked-SDPA), the model collapses into generic-refusal mode for
+both fresh and reused forwards, regardless of whether the splice
+introduced any divergence. Cosine sim of two similarly-degenerate
+outputs is ~0.93 trivially.
+
+The user flagged this exact failure mode earlier
+(`feedback_garbage_attractors.md`): a fresh-vs-reused similarity
+test is invalidated when the model collapses to a stable garbage
+attractor. **Sim values from phase 2.6 are uninformative.**
+
+The clean signal that survives: **top-1 disagrees on every single
+pair (0/11)**. Even when both outputs are degenerate refusals, the
+splice consistently shifts the very first generated token. Combined
+with the uniformly high KL (~12 nats), this confirms the splice is
+introducing real distributional drift — but the cosine-sim metric
+doesn't measure it because the model floor is the refusal template.
+
+### Refined bottom line
+
+For Gemma-4 E4B + lmcache-src + OpenCode:
+
+- Body-splice opportunities exist but are rare (~2-3% of pairs)
+  and most are deterministic tool outputs (file lists, file
+  contents).
+- The interesting larger matches (~3k-token shared file reads,
+  above disk-cache break-even) appear *only* when the agent is
+  actively reading the same file in multiple sessions.
+- At the 3k-token splice scale, the reused forward's next-token
+  distribution differs meaningfully from the fresh forward's
+  (KL ≈ 12 nats; top-1 disagrees uniformly).
+- The model's tendency to mode-collapse into refusal templates at
+  long contexts makes per-pair sim measurement uninformative on
+  this stack — the comparison metric needs to either run on a
+  model that doesn't degrade at 15k+ tokens, or be replaced by a
+  metric that doesn't trivially equate two degenerate outputs
+  (e.g. KL on logits, top-1 agreement, or a task-success metric).
+
+## Limitations (consolidated)
+
+- One model (Gemma-4 E4B), one codebase, one agent framework, 45
+  total sessions across phases 2.5 + 2.6. Estimates here are
+  suggestive, not definitive.
+- Several prompts let the model hallucinate without using tools
+  (~30% of phase 2.6 sessions had zero tool calls). The "how/where
+  is X" framings tend to elicit generic answers from priors, while
+  "find/audit/walk through" framings force tool use. We didn't
+  filter or rewrite these — that's real-piloted-agent behaviour.
+- Splice correctness was measured on bnb-4bit weights to fit
+  multiple pairs back-to-back on 4×A10G; quantization shifts sim
+  values slightly (pair 1 of phase 2.5: 0.91 bf16 → 0.85 nf4) but
+  qualitative outcomes are stable.
+- The chunked-SDPA fork patch is what made 21k+ context measurable
+  on Gemma-4. Without it, every phase 2.6 second-turn prefill OOMs.
+  The patch is mathematically equivalent to a single SDPA call
+  (per-row softmax independence) but does multiple kernel launches
+  per attention; expect a wallclock cost.
+- The garbage-attractor invalidation at long contexts (above) is
+  the main caveat on phase 2.6 splice numbers. The clean signal
+  remaining is top-1 disagreement (0/11) and KL (uniformly high).
+
 ## Future directions
 
-- Deeper trajectories. Increase max session steps. Use OpenCode in
-  TUI mode on real engineering tasks (with file edits, test
-  runs, multi-step debugging) rather than one-shot Q&A.
-- Test on Qwen3.5+ once we have a proper environment (per
-  preference order: Gemma-4 first, Qwen3.5+ second).
+- Deeper trajectories with file edits / test runs, not one-shot Q&A.
+- Test on Qwen3.5+ once we have a proper environment (preference
+  order: Gemma-4 first, Qwen3.5+ second).
 - Explore whether a write-time signal (attention entropy, K/V
   perturbation sensitivity, structural section identity from the
-  manifest) can correctly classify which sub-1k body matches will
-  splice cleanly. Reagent's earlier work showed best r ≈ 0.32 on
-  these proxies; with only 3 measured pairs here we can't
-  validate that on agent-trace data, but a phase-2.5-at-scale run
-  would.
+  manifest) can correctly classify which body matches will splice
+  with usable correctness. Reagent's earlier work showed best r ≈
+  0.32 on these proxies; we'd want at least 30 measured pairs at
+  consistent splice size to validate.
+- Pick a model variant or generation config that doesn't
+  garbage-attractor at 15k+ contexts so the sim metric becomes
+  meaningful again. Or move to a task-success metric (does the
+  reused agent get the right answer?) instead of textual sim.
