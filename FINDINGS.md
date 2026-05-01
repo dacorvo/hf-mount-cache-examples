@@ -157,28 +157,46 @@ Two big shifts vs phase 2.5:
    Sim mean 0.93 *looks* close but isn't telling the real story —
    see caveat below.
 
-### Caveat: garbage-attractor mode collapse at 15k+ context
+### Caveat: fresh-output mode collapse at 15k+ context invalidates the sim metric
 
-Inspecting fresh vs reused texts on phase 2.6 pairs reveals both
-outputs are pseudo-refusal templates ("I do not have specific
-documentation on…", "<eos>The documentation for OpenCode does not
-contain…"). At 15k+ token contexts on Gemma-4 E4B (bf16 +
-chunked-SDPA), the model collapses into generic-refusal mode for
-both fresh and reused forwards, regardless of whether the splice
-introduced any divergence. Cosine sim of two similarly-degenerate
-outputs is ~0.93 trivially.
+Inspecting the recorded fresh and reused texts on phase 2.6 pairs:
+**11 / 11 fresh forwards independently produce a generic
+pseudo-refusal template** ("I do not have specific documentation
+on…", "<eos>The documentation for OpenCode does not contain…").
+The reused forwards land on the same template family. At 15k+
+token contexts on Gemma-4 E4B (bf16 + chunked-SDPA), the model
+collapses into a refusal-mode attractor on these prompts
+regardless of whether any splice happened. Cosine sim of two
+similarly-degenerate outputs is ~0.93 trivially.
 
-The user flagged this exact failure mode earlier
-(`feedback_garbage_attractors.md`): a fresh-vs-reused similarity
-test is invalidated when the model collapses to a stable garbage
-attractor. **Sim values from phase 2.6 are uninformative.**
+This means **phase 2.6 does not measure splice correctness** — it
+measures the gap between two equally-degraded forwards on a
+broken prior. The fresh-vs-reused comparison was the whole
+experimental design, and the fresh side is already broken before
+splice is applied. The user flagged this exact failure mode
+earlier (`feedback_garbage_attractors.md`): a fresh-vs-reused
+similarity test is invalidated when the model collapses to a
+stable garbage attractor. **Sim values from phase 2.6 are
+uninformative.**
 
-The clean signal that survives: **top-1 disagrees on every single
-pair (0/11)**. Even when both outputs are degenerate refusals, the
-splice consistently shifts the very first generated token. Combined
-with the uniformly high KL (~12 nats), this confirms the splice is
-introducing real distributional drift — but the cosine-sim metric
-doesn't measure it because the model floor is the refusal template.
+The clean signals that survive the attractor:
+
+- **Top-1 disagrees on every single pair (0/11).** Even when both
+  outputs are degenerate refusals, the splice consistently shifts
+  the very first generated token. The argmax is sampled from the
+  full vocab, not from refusal-template tokens, so this signal is
+  not collapsed by the attractor.
+- **KL ≈ 12 nats uniformly.** The next-token distributions are
+  meaningfully different across the full vocab.
+
+Together these say "the splice does introduce real distributional
+drift," but they do **not** tell us whether that drift would
+produce a different *useful* completion in a setting where the
+fresh forward also produced a useful completion — which is the
+actually interesting question. To answer that we need either
+(a) a model whose fresh forward stays coherent at 15k+ tokens, or
+(b) a task-success metric that doesn't depend on the fresh forward
+being coherent.
 
 ### Refined bottom line
 
@@ -193,12 +211,15 @@ For Gemma-4 E4B + lmcache-src + OpenCode:
 - At the 3k-token splice scale, the reused forward's next-token
   distribution differs meaningfully from the fresh forward's
   (KL ≈ 12 nats; top-1 disagrees uniformly).
-- The model's tendency to mode-collapse into refusal templates at
-  long contexts makes per-pair sim measurement uninformative on
-  this stack — the comparison metric needs to either run on a
-  model that doesn't degrade at 15k+ tokens, or be replaced by a
-  metric that doesn't trivially equate two degenerate outputs
-  (e.g. KL on logits, top-1 agreement, or a task-success metric).
+- **The headline correctness number cannot be read off phase 2.6.**
+  Both fresh and reused forwards collapsed onto a refusal-mode
+  attractor at 15k+ tokens (11/11 fresh outputs degenerate), so
+  the sim metric is comparing two broken forwards. Top-1
+  disagreement and KL still register the splice-induced shift,
+  but they don't tell us whether the splice would corrupt a
+  *useful* completion. To get a usable correctness number at this
+  scale we need either a model that stays coherent at 15k+ tokens
+  on this workload, or a task-success metric.
 
 ## Limitations (consolidated)
 
@@ -219,9 +240,14 @@ For Gemma-4 E4B + lmcache-src + OpenCode:
   The patch is mathematically equivalent to a single SDPA call
   (per-row softmax independence) but does multiple kernel launches
   per attention; expect a wallclock cost.
-- The garbage-attractor invalidation at long contexts (above) is
-  the main caveat on phase 2.6 splice numbers. The clean signal
-  remaining is top-1 disagreement (0/11) and KL (uniformly high).
+- The fresh-output mode collapse at long contexts (above) is the
+  primary caveat on phase 2.6 splice numbers: 11/11 fresh forwards
+  produced the same refusal-mode template independently of any
+  splice, so the sim-based correctness comparison is between two
+  already-broken forwards. The clean signal remaining is top-1
+  disagreement (0/11) and KL (uniformly high) — those measure
+  splice-induced distributional shift but not splice-induced
+  *task-relevant* corruption.
 
 ## Future directions
 
