@@ -146,80 +146,91 @@ in `runs/phase2_6-2026-05-01-1700/`):
 Two big shifts vs phase 2.5:
 
 1. **Larger matches.** Median match jumped from ~500 to ~2954 tokens.
-   This is the substrate body-splice was supposed to act on. The
-   2954-tok match recurred across multiple pair clusters — three
-   sessions about vLLM-integration / chunk-policy / Redis-serializer
-   all read the same large file (likely `lmcache/v1/cache_engine.py`).
-   *Now we're above the typical disk-cache load break-even.*
+   On the surface this looks like the substrate body-splice was
+   supposed to act on. The 2954-tok match recurred across multiple
+   pair clusters. **Decoding the matches reveals what they
+   actually are: the OpenCode homepage HTML.** OpenCode's `webfetch`
+   tool, when handed a "How does X work?" question without an
+   explicit URL, defaulted to fetching `https://opencode.ai`.
+   Multiple sessions did this independently with the same URL, so
+   the byte-identical webfetch response is what shows up as a
+   shared 2954-tok span — *not* shared reads of `cache_engine.py`
+   or any other lmcache-src file.
 
-2. **Splice correctness collapsed at this size.** 0 / 11 splice
-   pairs preserve the next-token argmax. KL is uniformly ~12 nats.
-   Sim mean 0.93 *looks* close but isn't telling the real story —
-   see caveat below.
+2. **Splice correctness shifts measurably.** 0 / 11 splice pairs
+   preserve the next-token argmax. KL is uniformly ~12 nats. Sim
+   mean 0.93 *looks* close but is largely an artifact of comparing
+   two short refusal templates — see caveat below.
 
-### Caveat: fresh-output mode collapse at 15k+ context invalidates the sim metric
+### Caveat: the workload itself produces refusal templates, not the model collapsing
 
-Inspecting the recorded fresh and reused texts on phase 2.6 pairs:
-**11 / 11 fresh forwards independently produce a generic
-pseudo-refusal template** ("I do not have specific documentation
-on…", "<eos>The documentation for OpenCode does not contain…").
-The reused forwards land on the same template family. At 15k+
-token contexts on Gemma-4 E4B (bf16 + chunked-SDPA), the model
-collapses into a refusal-mode attractor on these prompts
-regardless of whether any splice happened. Cosine sim of two
-similarly-degenerate outputs is ~0.93 trivially.
+I originally read the 11/11 templated fresh outputs ("I do not
+have specific documentation on…") as a long-context model
+collapse and applied `feedback_garbage_attractors.md`. Closer
+inspection of the OpenCode session dumps refuted that:
 
-This means **phase 2.6 does not measure splice correctness** — it
-measures the gap between two equally-degraded forwards on a
-broken prior. The fresh-vs-reused comparison was the whole
-experimental design, and the fresh side is already broken before
-splice is applied. The user flagged this exact failure mode
-earlier (`feedback_garbage_attractors.md`): a fresh-vs-reused
-similarity test is invalidated when the model collapses to a
-stable garbage attractor. **Sim values from phase 2.6 are
-uninformative.**
+- All seven measured-pair tasks are "How does LMCache do X?"
+  framings.
+- In the original OpenCode runs, the agent's first tool call on
+  these prompts was `webfetch` to `https://opencode.ai` — its own
+  provider's homepage — *not* the lmcache-src codebase.
+- The agent then produced short refusal-style answers
+  ("I don't have specific documentation on LMCache…") in the
+  original run, with no further tool use. Token counts on those
+  original answers: 136–281 chars per session. Same template
+  family across all seven.
 
-The clean signals that survive the attractor:
+So the fresh forward in phase 2.6 isn't degenerate from
+long-context collapse; it's reproducing what the model
+legitimately produced in the original session, given a context
+where the most recent tool result was an irrelevant webfetch.
+Both fresh and reused outputs converge on the refusal template
+because that *is* the right next token for that context. Cosine
+sim of two refusal templates is ~0.93 trivially, so the sim
+metric is uninformative — but the upstream cause is **prompt
+design + agent default-tool behaviour**, not the model floor.
 
-- **Top-1 disagrees on every single pair (0/11).** Even when both
-  outputs are degenerate refusals, the splice consistently shifts
-  the very first generated token. The argmax is sampled from the
-  full vocab, not from refusal-template tokens, so this signal is
-  not collapsed by the attractor.
-- **KL ≈ 12 nats uniformly.** The next-token distributions are
-  meaningfully different across the full vocab.
+### What the splice numbers do tell us
 
-Together these say "the splice does introduce real distributional
-drift," but they do **not** tell us whether that drift would
-produce a different *useful* completion in a setting where the
-fresh forward also produced a useful completion — which is the
-actually interesting question. To answer that we need either
-(a) a model whose fresh forward stays coherent at 15k+ tokens, or
-(b) a task-success metric that doesn't depend on the fresh forward
-being coherent.
+The interesting question on phase 2.6 isn't "is the model
+collapsed?" but "does the splice still shift the
+next-token distribution when the legitimate next answer is a
+short template?":
+
+- **Top-1 disagrees on every single pair (0/11).** Even when the
+  legitimate next-token sequence is the refusal template, the
+  splice consistently shifts the very first generated token. The
+  argmax is over the full vocab, not just refusal-template tokens.
+- **KL ≈ 12 nats uniformly.** Distributional drift across the full
+  vocab is large.
+
+Together: at the 3k-token splice scale on these traces, the splice
+*does* perturb the fresh distribution non-trivially — even on
+contexts whose legitimate completion is a short, predictable
+template. We cannot conclude how much this drift would corrupt a
+substantively-useful completion on this workload, because the
+workload didn't produce one to begin with.
 
 ### Refined bottom line
 
 For Gemma-4 E4B + lmcache-src + OpenCode:
 
 - Body-splice opportunities exist but are rare (~2-3% of pairs)
-  and most are deterministic tool outputs (file lists, file
-  contents).
-- The interesting larger matches (~3k-token shared file reads,
-  above disk-cache break-even) appear *only* when the agent is
-  actively reading the same file in multiple sessions.
+  and most are deterministic tool outputs.
+- **The "interesting larger matches" (~3k-token) on phase 2.6 are
+  not shared file reads — they are shared webfetches of
+  `https://opencode.ai`** (OpenCode's default URL when the agent
+  is asked an open question without explicit codebase context).
+  Real cross-session sharing of lmcache-src file content was not
+  exercised by these 30 prompts.
 - At the 3k-token splice scale, the reused forward's next-token
   distribution differs meaningfully from the fresh forward's
-  (KL ≈ 12 nats; top-1 disagrees uniformly).
-- **The headline correctness number cannot be read off phase 2.6.**
-  Both fresh and reused forwards collapsed onto a refusal-mode
-  attractor at 15k+ tokens (11/11 fresh outputs degenerate), so
-  the sim metric is comparing two broken forwards. Top-1
-  disagreement and KL still register the splice-induced shift,
-  but they don't tell us whether the splice would corrupt a
-  *useful* completion. To get a usable correctness number at this
-  scale we need either a model that stays coherent at 15k+ tokens
-  on this workload, or a task-success metric.
+  (KL ≈ 12 nats; top-1 disagrees uniformly), even when the
+  legitimate completion is a short refusal template.
+- The phase 2.6 sim metric is uninformative because the legitimate
+  fresh outputs are themselves short templates — not because the
+  model collapsed. Sim measurement requires a workload whose
+  legitimate completions are non-templated.
 
 ## Limitations (consolidated)
 
@@ -231,6 +242,15 @@ For Gemma-4 E4B + lmcache-src + OpenCode:
   is X" framings tend to elicit generic answers from priors, while
   "find/audit/walk through" framings force tool use. We didn't
   filter or rewrite these — that's real-piloted-agent behaviour.
+- **Of the sessions that *did* use tools on "how does X" prompts,
+  the agent's first tool was almost uniformly `webfetch` to
+  `https://opencode.ai` (its own provider's homepage), not file
+  reads against lmcache-src.** This is what produced the
+  byte-identical 2954-tok cross-session matches — shared webfetch
+  responses, not shared codebase reads. Future runs should either
+  pre-pin the agent into the codebase root (so `webfetch` becomes
+  unattractive) or use prompts framed as "open `path/to/file.py`
+  and …" so `read_file` is the obvious first move.
 - Splice correctness was measured on bnb-4bit weights to fit
   multiple pairs back-to-back on 4×A10G; quantization shifts sim
   values slightly (pair 1 of phase 2.5: 0.91 bf16 → 0.85 nf4) but
@@ -240,17 +260,22 @@ For Gemma-4 E4B + lmcache-src + OpenCode:
   The patch is mathematically equivalent to a single SDPA call
   (per-row softmax independence) but does multiple kernel launches
   per attention; expect a wallclock cost.
-- The fresh-output mode collapse at long contexts (above) is the
-  primary caveat on phase 2.6 splice numbers: 11/11 fresh forwards
-  produced the same refusal-mode template independently of any
-  splice, so the sim-based correctness comparison is between two
-  already-broken forwards. The clean signal remaining is top-1
-  disagreement (0/11) and KL (uniformly high) — those measure
-  splice-induced distributional shift but not splice-induced
-  *task-relevant* corruption.
+- The phase 2.6 sim metric is uninformative because the legitimate
+  fresh completions are short refusal templates (not because the
+  model collapsed at long context — see "Caveat" above). The clean
+  signal remaining is top-1 disagreement (0/11) and KL (uniformly
+  high) — those measure splice-induced distributional shift, but
+  not splice-induced *task-relevant* corruption on a workload
+  where the legitimate next answer is non-templated.
 
 ## Future directions
 
+- Re-run phase 2.6 with prompts that pin the agent into lmcache-src
+  (e.g. "open `lmcache/v1/cache_engine.py` and explain the cache
+  lifecycle in 4 bullets"), so cross-session matches reflect
+  shared *file reads* rather than shared `webfetch` defaults.
+  This is the only scenario where post-prefix splice on agent
+  traces is plausibly load-bearing.
 - Deeper trajectories with file edits / test runs, not one-shot Q&A.
 - Test on Qwen3.5+ once we have a proper environment (preference
   order: Gemma-4 first, Qwen3.5+ second).
@@ -260,7 +285,7 @@ For Gemma-4 E4B + lmcache-src + OpenCode:
   with usable correctness. Reagent's earlier work showed best r ≈
   0.32 on these proxies; we'd want at least 30 measured pairs at
   consistent splice size to validate.
-- Pick a model variant or generation config that doesn't
-  garbage-attractor at 15k+ contexts so the sim metric becomes
-  meaningful again. Or move to a task-success metric (does the
-  reused agent get the right answer?) instead of textual sim.
+- Move to a task-success metric (does the reused agent get the
+  right answer?) instead of textual sim, so the comparison stops
+  being sensitive to the legitimate completion happening to be a
+  short template.
