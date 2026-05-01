@@ -3,3 +3,7 @@ lmcache/logs/
 lmcache/opencode.json
 lmcache/cufile.log
 __pycache__/
+
+# tserve research vehicle: per-request trace dumps from
+# TSERVE_TRACE_DIR. Host-local; large; reproducible by re-running.
+runs/

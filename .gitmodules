@@ -6,3 +6,6 @@
 	path = reagent
 	url = git@github.com:huggingface/reagent.git
 	branch = main
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/huggingface/transformers.git
