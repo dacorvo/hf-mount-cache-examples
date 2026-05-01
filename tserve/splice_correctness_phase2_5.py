@@ -77,6 +77,12 @@ def main() -> None:
         "the bf16 model leaves no GPU headroom on Gemma-4 4×A10G.",
     )
     p.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Read prior splice_correctness.json and skip any pairs "
+        "already measured. Lets the script resume after OOMs.",
+    )
+    p.add_argument(
         "--max-longest-match",
         type=int,
         default=5000,
@@ -86,14 +92,31 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    density_path = args.trace_dir / "match_density.json"
-    if not density_path.exists():
-        sys.exit(f"missing {density_path}; run measure_phase2_5.py first")
-    density = json.loads(density_path.read_text())
-    pairs = [
-        p for p in density["pairs"] if p["longest_match"] < args.max_longest_match
-    ]
-    print(f"[info] {len(pairs)} body-match pairs (after filtering longest>{args.max_longest_match})")
+    # Prefer the canonical analyzer's output if present.
+    analysis_path = args.trace_dir / "analysis_v2.json"
+    if not analysis_path.exists():
+        analysis_path = args.trace_dir / "match_density.json"
+    if not analysis_path.exists():
+        sys.exit(
+            f"missing {analysis_path}; run analyze_traces.py "
+            "or measure_phase2_5.py first"
+        )
+    density = json.loads(analysis_path.read_text())
+    print(f"[info] reading {analysis_path}")
+    pairs = []
+    for p in density["pairs"]:
+        if p.get("is_machinery_outlier"):
+            continue
+        if p["longest_match"] >= args.max_longest_match:
+            continue
+        pairs.append(p)
+    print(f"[info] {len(pairs)} body-match pairs (after filtering machinery outliers and longest>={args.max_longest_match})")
+    if args.skip_existing and (args.trace_dir / "splice_correctness.json").exists():
+        prior = json.loads((args.trace_dir / "splice_correctness.json").read_text())
+        done_keys = {(r["a_sid"], r["b_sid"]) for r in prior.get("results", []) if r.get("ok")}
+        before = len(pairs)
+        pairs = [p for p in pairs if (p["a_sid"], p["b_sid"]) not in done_keys]
+        print(f"[info] resuming: skipping {before - len(pairs)} pairs already measured")
     if not pairs:
         sys.exit("no pairs to measure")
 
@@ -210,6 +233,16 @@ def main() -> None:
             torch.cuda.empty_cache()
 
     out_path = args.trace_dir / "splice_correctness.json"
+    # Merge with prior results if --skip-existing was used so we don't
+    # overwrite earlier measurements when resuming.
+    if args.skip_existing and out_path.exists():
+        prior = json.loads(out_path.read_text())
+        prior_results = prior.get("results", [])
+        # Replace any retried-and-now-completed entries; keep prior OK.
+        new_keys = {(r["a_sid"], r["b_sid"]) for r in results}
+        merged = [r for r in prior_results if (r["a_sid"], r["b_sid"]) not in new_keys]
+        merged.extend(results)
+        results = merged
     out_path.write_text(json.dumps({"results": results}, indent=2, default=str))
     print(f"\n[info] wrote {out_path}")
 
