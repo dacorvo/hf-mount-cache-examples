@@ -45,7 +45,7 @@ export LOCAL_CACHE_DIR="${LOCAL_CACHE_DIR:-/tmp/hf-mount-local-cache-${PROFILE_N
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs/$PROFILE_NAME}"
 export VLLM_PORT="${VLLM_PORT:-8000}"
 export VLLM_URL="http://localhost:$VLLM_PORT"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount-nfs}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount}"
 export LMCACHE_BUCKET_PATH="$MOUNT_POINT/$PROFILE_NAME"
 export LMCACHE_LOCAL_PATH="$LOCAL_CACHE_DIR"
 

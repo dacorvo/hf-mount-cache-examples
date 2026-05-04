@@ -116,7 +116,6 @@ lmcache/
   lib/
     helpers.sh            # logging, metrics, summaries
     vllm.sh               # vLLM lifecycle (TP support)
-    hf-mount.sh           # mount lifecycle
     conversations.sh      # conversation runner + topic definitions
   profiles/
     qwen2.5-7b-tp1.sh             # Qwen2.5-Coder-7B, TP=1
