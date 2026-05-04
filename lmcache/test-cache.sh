@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# CLI for LMCache + vLLM cache integration tests.
+# CLI for LMCache + vLLM + hf-mount integration test.
 #
-# Orchestrates vLLM, hf-mount, and opencode conversations via
-# process-compose for proper lifecycle management.
+# Orchestrates vLLM, hf-mount, and a single-turn hermes conversation
+# via process-compose for proper lifecycle management.
 #
 # Usage:
 #   ./test-cache.sh [--profile <name>] <command>
@@ -41,13 +41,11 @@ source "$PROFILE_FILE"
 export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-lmcache}"
 export BUCKET="${BUCKET:-dacorvo/lm-cache}"
 export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-${PROFILE_NAME}}"
-export LOCAL_CACHE_DIR="${LOCAL_CACHE_DIR:-/tmp/hf-mount-local-cache-${PROFILE_NAME}}"
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs/$PROFILE_NAME}"
 export VLLM_PORT="${VLLM_PORT:-8000}"
 export VLLM_URL="http://localhost:$VLLM_PORT"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount-nfs}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount}"
 export LMCACHE_BUCKET_PATH="$MOUNT_POINT/$PROFILE_NAME"
-export LMCACHE_LOCAL_PATH="$LOCAL_CACHE_DIR"
 
 if [ -z "${HF_TOKEN:-}" ]; then
   export HF_TOKEN="$(cat ~/.cache/huggingface/token 2>/dev/null)"
@@ -62,46 +60,12 @@ export VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 [ -n "${TOOL_PARSER_PLUGIN:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tool-parser-plugin $TOOL_PARSER_PLUGIN"
 [ -n "${CHAT_TEMPLATE:-}" ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --chat-template $CHAT_TEMPLATE"
 [ "${TP_SIZE:-1}" -gt 1 ] && VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --tensor-parallel-size $TP_SIZE"
-# We run at most 6 parallel conversations — no need to warm up 256 sequences.
-VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --max-num-seqs 6"
 export VLLM_EXTRA_ARGS
 
 source "$SCRIPT_DIR/lib/helpers.sh"
 
 mkdir -p "$LOG_DIR"
 SESSION_LOG="$LOG_DIR/session.log"
-
-# ── opencode.json generation ──────────────────────────────────────────
-
-generate_opencode_json() {
-  cat > "$SCRIPT_DIR/opencode.json" <<EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "local": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Local vLLM ($MODEL_SHORT)",
-      "options": {
-        "baseURL": "http://localhost:${VLLM_PORT}/v1"
-      },
-      "models": {
-        "$MODEL": {
-          "name": "$MODEL_SHORT (cache test)",
-          "options": {
-            "max_tokens": $MAX_TOKENS
-          },
-          "limit": {
-            "context": $MAX_MODEL_LEN,
-            "output": $MAX_TOKENS
-          }
-        }
-      }
-    }
-  },
-  "model": "local/$MODEL"
-}
-EOF
-}
 
 # ── LMCache config generation ─────────────────────────────────────────
 
@@ -117,20 +81,11 @@ cufile_buffer_size: 512
 EOF
 }
 
-write_lmcache_config_cpuonly() {
-  local output="$1"
-  cat > "$output" <<EOF
-chunk_size: 256
-local_cpu: true
-max_local_cpu_size: 15.0
-EOF
-}
-
 # ── Run a phase via process-compose ───────────────────────────────────
 
 run_phase() {
   local phase="$1"
-  local prompt_set="$2"  # warmup or consume or dev
+  local prompt_set="$2"  # warmup or consume
   shift 2
   local gen_flags=("$@")  # --mount, --mount-overlay, etc.
 
@@ -139,7 +94,6 @@ run_phase() {
 
   log "====== Phase: $phase (profile: $PROFILE_NAME) ======"
   export PHASE="$phase"
-  generate_opencode_json
   clear_conv_stats
   export CACHE_DIR="${CACHE_DIR_OVERRIDE:-$MOUNT_POINT}"
 
@@ -163,71 +117,109 @@ run_phase() {
 
 # ── Phase commands ────────────────────────────────────────────────────
 
-cmd_baseline() {
-  local cfg="$LOG_DIR/lmcache_config_baseline.yaml"
-  write_lmcache_config_cpuonly "$cfg"
-  export LMCACHE_CONFIG_FILE="$cfg"
-  export CACHE_DIR_OVERRIDE="none"
-  run_phase "baseline" "consume"
-}
+cmd_warmup() {
+  local before_n; before_n=$(snapshot_bucket "$LOG_DIR/bucket-before-warmup.txt")
+  log "Bucket files before warmup: $before_n"
 
-cmd_local_cold() {
-  rm -rf "$LMCACHE_LOCAL_PATH"
-  mkdir -p "$LMCACHE_LOCAL_PATH"
-  local cfg="$LOG_DIR/lmcache_config_local.yaml"
-  write_lmcache_config "$LMCACHE_LOCAL_PATH" "$cfg"
-  export LMCACHE_CONFIG_FILE="$cfg"
-  export CACHE_DIR_OVERRIDE="$LMCACHE_LOCAL_PATH"
-  run_phase "local-cold" "consume"
-}
-
-cmd_local_warmup() {
-  rm -rf "$LMCACHE_LOCAL_PATH"
-  mkdir -p "$LMCACHE_LOCAL_PATH"
-  local cfg="$LOG_DIR/lmcache_config_local.yaml"
-  write_lmcache_config "$LMCACHE_LOCAL_PATH" "$cfg"
-  export LMCACHE_CONFIG_FILE="$cfg"
-  export CACHE_DIR_OVERRIDE="$LMCACHE_LOCAL_PATH"
-  run_phase "local-warmup" "warmup"
-}
-
-cmd_local_warm() {
-  local file_count
-  file_count=$(cache_file_count "$LMCACHE_LOCAL_PATH")
-  [ "$file_count" -eq 0 ] && die "No cache files in $LMCACHE_LOCAL_PATH — run 'local-warmup' first"
-  local cfg="$LOG_DIR/lmcache_config_local.yaml"
-  [ -f "$cfg" ] || write_lmcache_config "$LMCACHE_LOCAL_PATH" "$cfg"
-  export LMCACHE_CONFIG_FILE="$cfg"
-  export CACHE_DIR_OVERRIDE="$LMCACHE_LOCAL_PATH"
-  run_phase "local-warm" "consume"
-}
-
-cmd_bucket_warmup() {
   mkdir -p "$LMCACHE_BUCKET_PATH" 2>/dev/null || true
   local cfg="$LOG_DIR/lmcache_config_bucket.yaml"
   write_lmcache_config "$LMCACHE_BUCKET_PATH" "$cfg"
   export LMCACHE_CONFIG_FILE="$cfg"
   export CACHE_DIR_OVERRIDE="$LMCACHE_BUCKET_PATH"
-  run_phase "bucket-warmup" "warmup" --mount
+  run_phase "warmup" "warmup" --mount
+
+  local after_n; after_n=$(snapshot_bucket "$LOG_DIR/bucket-after-warmup.txt")
+  log "Bucket files after warmup: $after_n (delta: $((after_n - before_n)))"
 }
 
-cmd_bucket_rw() {
+cmd_consume() {
+  local before_n; before_n=$(snapshot_bucket "$LOG_DIR/bucket-before-consume.txt")
+  log "Bucket files before consume: $before_n"
+
   local cfg="$LOG_DIR/lmcache_config_bucket.yaml"
   [ -f "$cfg" ] || write_lmcache_config "$LMCACHE_BUCKET_PATH" "$cfg"
   export LMCACHE_CONFIG_FILE="$cfg"
   export CACHE_DIR_OVERRIDE="$LMCACHE_BUCKET_PATH"
-  run_phase "bucket-rw" "consume" --mount
+  run_phase "consume" "consume" --mount-overlay
+
+  local after_n; after_n=$(snapshot_bucket "$LOG_DIR/bucket-after-consume.txt")
+  log "Bucket files after consume: $after_n (delta: $((after_n - before_n)))"
 }
 
-cmd_bucket_overlay() {
-  local cfg="$LOG_DIR/lmcache_config_bucket.yaml"
-  [ -f "$cfg" ] || write_lmcache_config "$LMCACHE_BUCKET_PATH" "$cfg"
-  export LMCACHE_CONFIG_FILE="$cfg"
-  export CACHE_DIR_OVERRIDE="$LMCACHE_BUCKET_PATH"
-  run_phase "bucket-overlay" "consume" --mount-overlay
+cmd_verify() {
+  log "====== Phase: verify ======"
+  local pass=true
+
+  # 1. Bucket file list must be unchanged across consume (overlay didn't propagate).
+  local before="$LOG_DIR/bucket-before-consume.txt" after="$LOG_DIR/bucket-after-consume.txt"
+  if [ -f "$before" ] && [ -f "$after" ]; then
+    if diff -q "$before" "$after" >/dev/null; then
+      log "PASS: bucket file list unchanged across consume"
+    else
+      log "FAIL: bucket changed during consume:"
+      diff "$before" "$after" | head -20
+      pass=false
+    fi
+  else
+    log "SKIP: consume snapshots missing — run 'consume' first"
+    pass=false
+  fi
+
+  # 2. consume summary must show external (LMCache) cache hits — bucket prefix loaded.
+  local summary="$LOG_DIR/summary-consume.txt"
+  if [ -f "$summary" ]; then
+    local external_cache_hits="" external_cache_queries=""
+    eval "$(grep -E '^external_cache_(hits|queries)=' "$summary")"
+    if [ -n "$external_cache_hits" ] && [ "$external_cache_hits" != "0.0" ]; then
+      log "PASS: external_cache_hits=$external_cache_hits / $external_cache_queries (prefix served from bucket)"
+    else
+      log "FAIL: no external_cache_hits in $summary"
+      pass=false
+    fi
+  else
+    log "SKIP: $summary missing — run 'consume' first"
+    pass=false
+  fi
+
+  # 3. Overlay's upper layer at $LMCACHE_BUCKET_PATH must hold locally-written
+  # chunks (the consume request's user-message tail) after unmount.
+  if [ -d "$LMCACHE_BUCKET_PATH" ]; then
+    local n
+    n=$(find "$LMCACHE_BUCKET_PATH" -name "*.kvcache.safetensors" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$n" -gt 0 ]; then
+      log "PASS: overlay-local layer at $LMCACHE_BUCKET_PATH holds $n KV cache file(s)"
+    else
+      log "WARN: overlay-local layer empty (consume produced no new chunks)"
+    fi
+  fi
+
+  echo
+  if $pass; then
+    log "====== VERIFY: ALL CHECKS PASSED ======"
+  else
+    log "====== VERIFY: SOME CHECKS FAILED ======"
+    return 1
+  fi
 }
 
 # ── Utility commands ──────────────────────────────────────────────────
+
+# Bucket file listing (used by warmup/consume snapshots and verify).
+list_bucket_files() {
+  uv run --quiet --with "huggingface_hub>=1.0" python - <<EOF
+from huggingface_hub import HfApi
+api = HfApi()
+files = sorted(f.path for f in api.list_bucket_tree("$BUCKET", recursive=True) if hasattr(f, "size"))
+for f in files:
+    print(f)
+EOF
+}
+
+snapshot_bucket() {
+  local out="$1"
+  list_bucket_files > "$out" 2>/dev/null || true
+  wc -l < "$out" | tr -d ' '
+}
 
 cmd_status() {
   local show_all=false
@@ -251,11 +243,11 @@ cmd_status() {
       [ -f "$summary" ] || continue
       found=true
       local phase="" profile="" timestamp="" cache_dir="" cache_files="" cache_size=""
-      local elapsed="" total_turns="" max_tokens="" num_requests=""
+      local elapsed="" num_requests=""
       local prompt_tokens="" prompt_tokens_cached="" generation_tokens=""
       local prefix_cache_queries="" prefix_cache_hits=""
       local external_cache_queries="" external_cache_hits=""
-      local avg_first_ttft_ms="" avg_ttft_ms="" avg_e2e_ms=""
+      local first_turn_ttft_ms="" avg_ttft_ms="" avg_e2e_ms=""
       eval "$(cat "$summary")"
       if $show_all; then
         echo "--- $profile_label / $phase ---"
@@ -264,8 +256,6 @@ cmd_status() {
       fi
       [ -n "$elapsed" ] && echo "  Elapsed:        $elapsed"
       [ -n "$num_requests" ] && echo "  Requests:       $num_requests"
-      [ -n "$total_turns" ] && echo "  Turns:          $total_turns"
-      [ -n "$max_tokens" ] && [ "$max_tokens" != "0" ] && echo "  Max tokens:     $max_tokens"
       [ -n "$prompt_tokens" ] && echo "  Prompt tokens:  $prompt_tokens"
       [ -n "$prompt_tokens_cached" ] && echo "  Cached tokens:  $prompt_tokens_cached"
       [ -n "$generation_tokens" ] && echo "  Gen tokens:     $generation_tokens"
@@ -275,7 +265,7 @@ cmd_status() {
       if [ -n "$external_cache_hits" ] && [ -n "$external_cache_queries" ] && [ "$external_cache_queries" != "0.0" ]; then
         echo "  External cache: $(awk "BEGIN {printf \"%.1f\", ($external_cache_hits / $external_cache_queries) * 100}")%"
       fi
-      [ -n "$avg_first_ttft_ms" ] && echo "  1st turn TTFT:  ${avg_first_ttft_ms}ms (wall clock)"
+      [ -n "$first_turn_ttft_ms" ] && echo "  1st turn TTFT:  ${first_turn_ttft_ms}ms (wall clock)"
       [ -n "$avg_ttft_ms" ] && echo "  Avg TTFT:       ${avg_ttft_ms}ms"
       [ -n "$avg_e2e_ms" ] && echo "  Avg e2e:        ${avg_e2e_ms}ms"
       [ "$cache_dir" != "none" ] && [ -n "$cache_files" ] && echo "  Cache files:    $cache_files ($cache_size)"
@@ -286,8 +276,9 @@ cmd_status() {
 }
 
 cmd_teardown() {
-  # NEVER call umount on hf-mount — it corrupts NFS state and requires a reboot.
-  # Use process-compose down for ordered shutdown (consumers → vllm → hf-mount).
+  # Ordered shutdown drives each process's shutdown step in reverse-dep order.
+  # For hf-mount that's `hf-mount stop <path>` (the wrapper's coordinated
+  # unmount), set as shutdown.command in templates/phase.yaml.j2.
   "$PC_BIN" down --ordered-shutdown 2>/dev/null || true
   log "Teardown complete."
 }
@@ -311,7 +302,7 @@ for f in files:
   fi
 
   log "Found $count files in bucket $BUCKET"
-  echo "$file_list" | head -10
+  head -10 <<< "$file_list"
   [ "$count" -gt 10 ] && echo "  ... and $((count - 10)) more"
 
   log "Deleting all files..."
@@ -329,9 +320,9 @@ if files:
 # ── Batch commands ────────────────────────────────────────────────────
 
 cmd_run_all() {
-  for phase in baseline local-cold local-warmup local-warm bucket-warmup bucket-rw bucket-overlay; do
-    "cmd_${phase//-/_}"
-  done
+  cmd_warmup
+  cmd_consume
+  cmd_verify
   log "====== All phases complete (profile: $PROFILE_NAME) ======"
   cmd_status
 }
@@ -357,13 +348,9 @@ cmd_run_suite() {
 # ── Main dispatch ───────────────────────────────────────────────────────
 
 case "${1:-help}" in
-  baseline)         cmd_baseline ;;
-  local-cold)       cmd_local_cold ;;
-  local-warmup)     cmd_local_warmup ;;
-  local-warm)       cmd_local_warm ;;
-  bucket-warmup)    cmd_bucket_warmup ;;
-  bucket-rw)        cmd_bucket_rw ;;
-  bucket-overlay)   cmd_bucket_overlay ;;
+  warmup)           cmd_warmup ;;
+  consume)          cmd_consume ;;
+  verify)           cmd_verify ;;
   status)           shift; cmd_status "$@" ;;
   teardown)         cmd_teardown ;;
   clear-bucket)     cmd_clear_bucket ;;
@@ -380,24 +367,24 @@ $(for f in "$SCRIPT_DIR/profiles"/*.sh; do
     printf "  %-14s %s\n" "$name" "$desc"
   done)
 
-Phases (6 parallel conversations each, orchestrated by process-compose):
+Phases (orchestrated by process-compose):
 
-  baseline         CPU-only LMCache, no disk. Pure prefix cache reference.
-  local-cold       No mount. Cold local disk reference timing.
-  local-warmup     No mount. Populate local disk cache (warmup prompts).
-  local-warm       No mount. Consume from warm local disk cache.
-
-  bucket-warmup    Read-write mount. Populate cache in the bucket.
-  bucket-rw        Read-write mount. Consume cache from the bucket.
-  bucket-overlay   Overlay mount. Consume cache from the bucket.
+  warmup           Read-write mount. Send one prompt, KV chunks are
+                   written to the bucket.
+  consume          Overlay mount. Send one prompt, the shared system-
+                   prompt prefix is served from the bucket; new chunks
+                   stay local (bucket unchanged).
+  verify           Check bucket invariance across consume, that LMCache
+                   external_cache_hits > 0, and that the overlay-local
+                   layer holds the new chunks.
 
 Batch:
-  run-all          Run all 7 phases for the current profile.
-  run-suite [p..]  Run all phases for each profile (default: all profiles).
+  run-all          warmup + consume + verify for the current profile.
+  run-suite [p..]  run-all for each profile (default: all profiles).
 
 Utilities:
   status [--all]   Show results for current profile (or all profiles).
-  teardown         Kill all vLLM, hf-mount, and opencode processes.
+  teardown         Kill all vLLM and hf-mount processes via process-compose.
   clear-bucket     Delete all files from the HF bucket.
 
 Tip: attach to a running phase with: process-compose attach

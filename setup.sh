@@ -5,9 +5,10 @@
 # This script:
 #   1. Initializes the hf-mount submodule and builds hf-mount-nfs
 #   2. Creates a Python venv with uv and installs vLLM
-#   3. Installs opencode
 #
 # Individual test directories have their own setup.sh for extra deps.
+# The lmcache test additionally requires hermes-agent to be installed
+# (https://github.com/NousResearch/hermes-agent) — see lmcache/README.md.
 #
 set -euo pipefail
 
@@ -56,13 +57,6 @@ source "$VENV_DIR/bin/activate"
 log "Installing vLLM..."
 uv pip install vllm
 
-# ── 3. opencode ───────────────────────────────────────────────────────
-
-if ! command -v opencode &>/dev/null; then
-  log "Installing opencode..."
-  curl -fsSL https://opencode.ai/install | bash
-fi
-
 # ── Done ──────────────────────────────────────────────────────────────
 
 cat <<EOF
@@ -72,10 +66,10 @@ cat <<EOF
 ============================================================
   hf-mount-nfs: $REPO_ROOT/target/release/hf-mount-nfs
   Python venv:  $VENV_DIR
-  opencode:     $(command -v opencode 2>/dev/null || echo "not in PATH yet — restart your shell")
 
   Now run the test-specific setup:
     source $VENV_DIR/bin/activate
-    cd lmcache && ./setup.sh
+    cd lmcache && ./setup.sh        # lmcache also needs hermes-agent
+    cd torch.compile && ./setup.sh
 ============================================================
 EOF

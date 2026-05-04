@@ -16,13 +16,16 @@ processes:
 
 {% if mount_mode %}
   hf-mount:
-    command: "{{ hf_mount_bin }} --hf-token {{ hf_token }} --cache-dir {{ hf_mount_cache_dir }}{{ ' --overlay' if mount_mode == 'overlay' else '' }} bucket {{ bucket }} {{ mount_point }}"
-    environment:
-      - "RUST_LOG=hf_mount=info"
+    command: "{{ hf_mount_bin }} start --hf-token {{ hf_token }} --cache-dir {{ hf_mount_cache_dir }}{{ ' --overlay' if mount_mode == 'overlay' else '' }} bucket {{ bucket }} {{ mount_point }}"
+    is_daemon: true
     log_location: "{{ log_dir }}/hf-mount-{{ phase }}.log"
-    ready_log_line: "listening on"
+    readiness_probe:
+      exec:
+        command: "grep -q ' {{ mount_point }} ' /proc/mounts"
+      period_seconds: 1
+      failure_threshold: 30
     shutdown:
-      signal: 15
+      command: "{{ hf_mount_bin }} stop {{ mount_point }}"
       timeout_seconds: 30
 
 {% endif %}
@@ -45,7 +48,7 @@ processes:
 {% if mount_mode %}
     depends_on:
       hf-mount:
-        condition: process_log_ready
+        condition: process_healthy
 {% endif %}
 
 {% for conv in conversations %}

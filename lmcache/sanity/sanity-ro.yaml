@@ -1,0 +1,26 @@
+version: "0.5"
+log_location: "/tmp/sanity-pc-ro.log"
+log_level: info
+
+processes:
+  hf-mount:
+    command: "${HF_MOUNT_BIN} start --hf-token ${HF_TOKEN} --cache-dir /tmp/sanity-cache --read-only bucket dacorvo/lm-cache /tmp/sanity-mnt"
+    is_daemon: true
+    log_location: "/tmp/sanity-hf-mount-ro.log"
+    readiness_probe:
+      exec:
+        command: "grep -q ' /tmp/sanity-mnt ' /proc/mounts"
+      period_seconds: 1
+      failure_threshold: 30
+    shutdown:
+      command: "${HF_MOUNT_BIN} stop /tmp/sanity-mnt"
+      timeout_seconds: 30
+
+  ls:
+    command: "bash -c 'ls -la /tmp/sanity-mnt/ && echo --- && ls -la /tmp/sanity-mnt/qwen2.5-7b-tp1/ | head -20'"
+    log_location: "/tmp/sanity-ls-ro.log"
+    depends_on:
+      hf-mount:
+        condition: process_healthy
+    availability:
+      exit_on_end: true

@@ -83,38 +83,13 @@ save_summary() {
     echo "cache_files=$file_count"
     echo "cache_size=${file_size:-0}"
     [ -n "$elapsed" ] && echo "elapsed=${elapsed}s"
-    # Aggregate per-conversation stats (turns, max_tokens, first-turn TTFT).
-    local total_turns=0 overall_max_tokens=0
-    local ttft_sum_first=0 ttft_count_first=0
+    # First-turn TTFT from the per-conversation stats file (one per phase).
+    local first_turn_ttft_ms=""
     for sf in "$LOG_DIR"/conv-stats-*-"${phase}".txt; do
       [ -f "$sf" ] || continue
-      local turns=0 max_tokens=0 first_turn_ttft_ms=""
       eval "$(cat "$sf")"
-      total_turns=$((total_turns + turns))
-      [ "$max_tokens" -gt "$overall_max_tokens" ] && overall_max_tokens="$max_tokens"
-      if [ -n "$first_turn_ttft_ms" ] && [ "$first_turn_ttft_ms" != "n/a" ]; then
-        ttft_sum_first=$((ttft_sum_first + first_turn_ttft_ms))
-        ttft_count_first=$((ttft_count_first + 1))
-      fi
     done
-    echo "total_turns=$total_turns"
-    # "Total tokens" is logged by EngineCore, not APIServer. Find the
-    # EngineCore PID that corresponds to our APIServer session.
-    local engine_pid=""
-    local vllm_log="$LOG_DIR/vllm-${phase}.log"
-    if [ -f "$vllm_log" ] && [ -n "$vllm_pid" ]; then
-      engine_pid=$(grep -o "EngineCore pid=[0-9]*" "$vllm_log" \
-        | tail -1 | grep -o "[0-9]*")
-    fi
-    if [ -n "$engine_pid" ]; then
-      overall_max_tokens=$(grep "pid=$engine_pid" "$vllm_log" \
-        | grep -o "Total tokens [0-9]*" \
-        | awk '{if($3>m)m=$3} END{print m+0}')
-    fi
-    echo "max_tokens=$overall_max_tokens"
-    if [ "$ttft_count_first" -gt 0 ]; then
-      echo "avg_first_ttft_ms=$((ttft_sum_first / ttft_count_first))"
-    fi
+    [ -n "$first_turn_ttft_ms" ] && echo "first_turn_ttft_ms=$first_turn_ttft_ms"
     # ── Prometheus metrics (must be captured before vLLM stops) ──
     local pm
     # Tokens

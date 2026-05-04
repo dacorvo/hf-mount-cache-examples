@@ -1,33 +1,50 @@
 # LMCache + vLLM + hf-mount Integration Test
 
-Integration test for hf-mount with vLLM and LMCache. Compares KV cache
-performance across local disk, read-write bucket mounts, and overlay
-mounts. Supports multiple models and tensor parallelism configurations
-via profiles.
+Verifies that LMCache's bucket-backed external prefix cache works
+end-to-end through an HF Bucket mounted with `hf-mount`, and that
+**overlay** mode lets a consumer reuse the bucket-stored prefix without
+mutating the bucket.
+
+## What it does
+
+LMCache intercepts vLLM's KV-cache I/O and persists chunks to a
+configured backend. Pointing its `gds_path` inside an `hf-mount`-mounted
+bucket makes the chunks shared.
+
+Three phases (mirroring `../torch.compile/`):
+
+| Phase    | Mount    | Action                                                                 | Bucket effect            |
+|----------|----------|------------------------------------------------------------------------|--------------------------|
+| warmup   | rw       | One hermes turn → vLLM computes prefill → LMCache writes chunks        | Files uploaded           |
+| consume  | overlay  | Cold-start vLLM → hermes turn with a *different* prompt → prefix hit   | Unchanged (writes local) |
+| verify   | —        | Diff bucket file list, check `external_cache_hits`, overlay-local files| —                        |
+
+The cache hit in `consume` comes from the **shared hermes system prompt
+prefix** (~13K tokens of tool definitions, soul, skills) — identical
+across runs. The user-message tail differs between warmup
+(`prompts/warmup/auth-system.txt`) and consume
+(`prompts/consume/api-codegen.txt`) so the visible cache hit is purely
+prefix coverage, not a trivial whole-prompt match.
 
 ## Prerequisites
 
-NVIDIA GPU(s) with CUDA 12.1+, Rust toolchain, Python 3.10+.
-
-### Setup
-
-From the repo root:
+NVIDIA GPU with CUDA 12.1+, Rust toolchain, Python 3.10+. From the repo
+root:
 
 ```bash
-# Shared setup: submodule, build hf-mount, venv with vLLM, opencode
-./setup.sh
+./setup.sh                       # builds hf-mount, venv with vLLM
 source .venv/bin/activate
-
-# LMCache-specific
-cd lmcache && ./setup.sh
+cd lmcache && ./setup.sh         # installs LMCache
 ```
 
-### HuggingFace token
+Plus **hermes-agent** must be on PATH (typically `~/.local/bin/hermes`):
+[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+The runner copies your `~/.hermes/` into a per-conversation overlay and
+overrides `model.{default,base_url,context_length}` — your real config
+is untouched.
 
-```bash
-export HF_TOKEN=hf_...
-# or: huggingface-cli login
-```
+`HF_TOKEN` must be exported (or in `~/.cache/huggingface/token`) and
+must have write access to the target bucket.
 
 ## Quick start
 
@@ -35,130 +52,162 @@ export HF_TOKEN=hf_...
 source .venv/bin/activate
 cd lmcache
 
-# Run all 6 phases with the default profile (qwen2.5-7b-tp1):
+# Optional: clear the bucket before a fresh run
+./test-cache.sh clear-bucket
+
+# End-to-end (~5 min on 1× A10 with Qwen2.5-Coder-7B)
 ./test-cache.sh run-all
 
-# Run all phases for all profiles:
-./test-cache.sh run-suite
+# Or step through manually
+./test-cache.sh warmup
+./test-cache.sh consume
+./test-cache.sh verify
 
-# Run a specific phase with a specific profile:
-./test-cache.sh --profile qwen2.5-32b-tp4 bucket-overlay
-
-# Show results:
-./test-cache.sh status           # current profile
-./test-cache.sh status --all     # all profiles
+# Show summary
+./test-cache.sh status
 ```
 
 ## Profiles
 
-Each profile defines a model, tensor parallelism degree, and resource
-limits. Profiles live in `profiles/`:
+`profiles/<name>.sh` defines a model, TP degree, and resource limits.
+Today only one profile is exercised end-to-end:
 
-| Profile | Model | TP | GPUs |
-|---------|-------|----|------|
-| `qwen2.5-7b-tp1` (default) | Qwen2.5-Coder-7B-Instruct | 1 | 1x A10 |
-| `qwen3-coder-30b-fp8-tp2` | Qwen3-Coder-30B-A3B-Instruct-FP8 | 2 | 2x A10 |
+| Profile          | Model                          | TP | GPUs   |
+|------------------|--------------------------------|----|--------|
+| `qwen2.5-7b-tp1` | Qwen/Qwen2.5-Coder-7B-Instruct | 1  | 1× A10 |
 
-Select via `--profile <name>` or `PROFILE=<name>`.
+Pick it with `--profile qwen2.5-7b-tp1` (also the default).
 
-## Phases
+Adding new profiles is a matter of dropping a `.sh` file in
+`profiles/` and pointing it at any vLLM-compatible model with a
+working tool-call parser (hermes sends tool definitions in every
+request). Models with hybrid attention (Qwen3.5, Qwen3-Coder-Next) are
+incompatible with LMCache regardless — see "Model compatibility"
+below.
 
-Each phase runs 6 multi-turn opencode conversations. Each conversation
-grows the context through code generation prompts until it reaches 90%
-of the model's max context length (triggering opencode's compaction),
-then runs 3 more turns to verify cache hits survive compaction.
-Warmup and consume use different topics to avoid biased cache hit rates.
+## Lifecycle (how the mount stays clean)
 
-| Phase | Mount | Cache state | Purpose |
-|-------|-------|-------------|---------|
-| `baseline` | none | CPU only | Pure prefix cache reference |
-| `local-cold` | none | empty disk | Cold start with disk writes |
-| `local-warmup` | none | → warm | Populate local disk cache |
-| `local-warm` | none | warm | Warm local cache baseline |
-| `bucket-warmup` | read-write | → warm | Populate bucket cache |
-| `bucket-rw` | read-write | warm | Shared cache via RW mount |
-| `bucket-overlay` | overlay | warm | Shared cache via overlay |
+`process-compose` drives the YAML rendered from
+[`templates/phase.yaml.j2`](templates/phase.yaml.j2) for each phase:
 
-## Results (qwen2.5-7b-tp1, single A10)
+- `hf-mount` runs as `is_daemon: true` via `hf-mount start ... bucket ...`
+- Readiness probe: `grep ' /tmp/hf-mount-lmcache ' /proc/mounts`
+- Shutdown: `shutdown.command: hf-mount stop /tmp/hf-mount-lmcache`
+  (the wrapper's coordinated unmount — never raw umount)
+- `vllm` `depends_on: hf-mount: process_healthy`
+- `conv-<name>` `depends_on: vllm: process_healthy`, runs
+  `lib/run-conversation.sh`
+- `summary` `depends_on: conv-<name>: process_completed`,
+  `availability.exit_on_end: true` so finishing it tears the project
+  down in dependency order
 
-Qwen2.5-Coder-7B-Instruct, 3 conversations per phase (~10K token
-system prompt from opencode):
+There's also `lmcache/sanity/` — two minimal process-compose YAMLs
+(read-only and overlay) that exercise the mount lifecycle end-to-end
+without vLLM. Useful for proving the `hf-mount start` / `hf-mount stop`
+pattern in isolation when something looks off.
 
-| Phase | Elapsed | External cache hit |
-|-------|---------|-------------------|
-| local-cold | 92s | 0.0% |
-| local-warmup | 112s | 0.0% |
-| local-warm | 64s | 94.0% |
-| bucket-warmup | (tbd) | 0.0% |
-| bucket-rw | 120s | 94.0% |
-| **bucket-overlay** | **75s** | **94.1%** |
+## How `verify` decides
 
-**Key findings:**
+Three checks, all must pass:
 
-- **Overlay is 37% faster than read-write** (75s vs 120s) for consumers.
-  Read-write mounts flush new KV cache chunks back to the bucket on every
-  store — overlay avoids this write-back I/O entirely.
-- **94% external cache hit rate** across all warm phases — the shared
-  system prompt prefix (~10K tokens) is cached on first use and reused
-  across all subsequent conversations.
-- **bucket-warmup vs local-warmup** shows the cost of writing cache
-  chunks through hf-mount in real time versus writing locally and pushing
-  to the bucket in one batch afterward.
-- **Local warm disk is fastest** (64s) — the baseline for what's
-  achievable without network I/O.
+1. **Bucket file list unchanged across consume.** Snapshots taken by
+   `cmd_warmup` / `cmd_consume` via `huggingface_hub.HfApi.list_bucket_tree`
+   are diffed. Overlay mode must not propagate to remote.
+2. **`external_cache_hits > 0`** in `summary-consume.txt` — read by the
+   `prom_metric vllm:external_prefix_cache_hits_total`. Confirms
+   LMCache served prefix tokens from the bucket.
+3. **Overlay-local layer holds new chunks.** After unmount the upper
+   layer of the overlay (the mount-point directory itself, on local
+   disk) must contain the `.kvcache.safetensors` files written for the
+   divergent user-message tail.
 
-## Directory structure
+## Configuration
+
+| Variable             | Default                                          |
+|----------------------|--------------------------------------------------|
+| `PROFILE`            | `qwen2.5-7b-tp1`                                 |
+| `BUCKET`             | `dacorvo/lm-cache`                               |
+| `MOUNT_POINT`        | `/tmp/hf-mount-lmcache`                          |
+| `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-<profile>`                  |
+| `HF_MOUNT_BIN`       | `../hf-mount/target/release/hf-mount` (wrapper)  |
+| `VLLM_PORT`          | `8000`                                           |
+| `LOG_DIR`            | `lmcache/logs/<profile>` (gitignored)            |
+
+Model-specific knobs (`MODEL`, `TP_SIZE`, `MAX_MODEL_LEN`,
+`TOOL_CALL_PARSER`, `TOOL_PARSER_PLUGIN`, `CHAT_TEMPLATE`) live in
+profile files and shouldn't normally be overridden.
+
+## Files
 
 ```
 lmcache/
-  test-cache.sh           # main CLI
-  setup.sh                # LMCache-specific deps
+  test-cache.sh        # CLI: warmup / consume / verify / status / clear-bucket / teardown
+  setup.sh             # uv pip install lmcache
+  README.md            # this file
   lib/
-    helpers.sh            # logging, metrics, summaries
-    vllm.sh               # vLLM lifecycle (TP support)
-    hf-mount.sh           # mount lifecycle
-    conversations.sh      # conversation runner + topic definitions
+    helpers.sh                            # logging + summary file aggregator
+                                          # (cache_file_count, prom_metric, save_summary)
+    generate-phase.py                     # renders templates/phase.yaml.j2 from profile
+                                          # + LMCACHE_CONFIG_FILE + mount mode → YAML
+    run-conversation.sh                   # the conv-<name> process body: copies
+                                          # ~/.hermes/ into a per-conv overlay, rewrites
+                                          # config.yaml's model.{default,base_url,
+                                          # context_length}, runs `hermes chat -q ...`,
+                                          # writes first_turn_ttft_ms to a stats file
+    qwen2_5_coder_tool_parser.py          # vLLM tool-parser plugin used by the qwen2.5
+    tool_chat_template_qwen2_5_coder.jinja  # profile (Qwen2.5-Coder emits tool calls in
+                                          # a non-default format that vLLM needs to parse)
+  templates/
+    phase.yaml.j2        # the only template — rendered per phase by generate-phase.py.
+                         # Defines four process-compose processes:
+                         #   1. hf-mount  (is_daemon: true, exec readiness probe on
+                         #                 /proc/mounts, shutdown.command: hf-mount stop)
+                         #   2. vllm      (depends_on hf-mount: process_healthy, http
+                         #                 readiness on /v1/models)
+                         #   3. conv-<n>  (one per .txt in prompts/<set>/, runs
+                         #                 lib/run-conversation.sh, depends_on vllm)
+                         #   4. summary   (depends_on conv-*: process_completed,
+                         #                 calls helpers.sh save_summary, exit_on_end)
   profiles/
-    qwen2.5-7b-tp1.sh             # Qwen2.5-Coder-7B, TP=1
-    qwen3-coder-30b-fp8-tp2.sh    # Qwen3-Coder-30B-FP8, TP=2
-  logs/<profile>/         # per-profile logs and summaries (gitignored)
-  opencode.json           # generated at runtime (gitignored)
+    qwen2.5-7b-tp1.sh    # model + TP + GPU mem util + tool-parser plugin path
+  prompts/
+    warmup/<one>.txt     # the one prompt sent during warmup
+    consume/<one>.txt    # the one prompt sent during consume (different from warmup so
+                         # cache hits come from the shared hermes system prompt prefix
+                         # only, not from accidental whole-prompt match)
+  sanity/                # mount-lifecycle sanity test, no vLLM, no LMCache, no hermes —
+                         # just process-compose + hf-mount, useful when something looks
+                         # off in the wrapper-driven mount path
+    sanity-ro.yaml         # process-compose YAML: mount dacorvo/lm-cache --read-only
+                           # at /tmp/sanity-mnt, run `ls`, exit_on_end shuts it down
+    sanity-overlay.yaml    # same but --overlay
+    run-sanity.sh          # runs both YAMLs sequentially, asserts /proc/mounts is empty
+                           # between and after the two phases (no zombie mounts)
+  logs/<profile>/      # per-phase logs and summaries (gitignored):
+                       #   process-compose-<phase>.yaml      — rendered YAML
+                       #   session-<phase>.log               — process-compose stdout
+                       #   vllm-<phase>.log                  — vLLM stdout
+                       #   hf-mount-<phase>.log              — hf-mount stdout
+                       #   conv-<name>-<phase>.log           — hermes stdout
+                       #   conversation-<name>-<phase>.log   — hermes session output
+                       #   conv-stats-<name>-<phase>.txt     — per-conv first_turn_ttft_ms
+                       #   summary-<phase>.txt               — aggregated metrics
+                       #   bucket-{before,after}-<phase>.txt — HF API listing snapshots
+                       #   hermes-<name>/                    — per-conv HERMES_HOME overlay
 ```
 
 ## Model compatibility
 
 LMCache uses vLLM's `--kv-transfer-config` to intercept KV cache
-operations. This **disables the hybrid KV cache manager**, which means
-models using hybrid attention architectures (e.g. GatedDeltaNet +
-standard attention) are incompatible.
+operations, which **disables the hybrid KV cache manager**. Models with
+hybrid attention architectures (e.g. GatedDeltaNet + standard attention)
+are incompatible.
 
-| Architecture | Example models | LMCache compatible |
-|-------------|---------------|-------------------|
-| Standard attention (GQA/MHA) | Qwen2.5-Coder, Qwen3-Coder-30B | Yes |
-| Hybrid (GatedDeltaNet) | Qwen3.5, Qwen3-Coder-Next | **No** |
+| Architecture                | Example models                       | LMCache compatible |
+|-----------------------------|--------------------------------------|--------------------|
+| Standard attention (GQA/MHA)| Qwen2.5-Coder, Qwen3-Coder-30B, Llama-3.1 | Yes               |
+| Hybrid (GatedDeltaNet)      | Qwen3.5, Qwen3-Coder-Next            | **No**            |
 
 See [LMCache#2845](https://github.com/LMCache/LMCache/issues/2845) and
 [vllm#36771](https://github.com/vllm-project/vllm/issues/36771) for
 details.
-
-Additionally, models must support tool calling via vLLM's
-`--tool-call-parser` for opencode to read files and interact with the
-codebase. Qwen2.5-Coder requires a
-[custom parser plugin](https://github.com/hanXen/vllm-qwen2.5-coder-tool-parser);
-Qwen3-Coder uses `qwen3_xml` natively.
-
-## Configuration
-
-Environment variable overrides:
-
-| Variable         | Default                             | Description                    |
-|------------------|-------------------------------------|--------------------------------|
-| `PROFILE`        | `qwen2.5-7b-tp1`                            | Profile name                   |
-| `BUCKET`         | `dacorvo/lm-cache`                  | HuggingFace bucket ID          |
-| `MOUNT_POINT`    | `/tmp/hf-mount-lmcache`             | Mount directory                |
-| `VLLM_PORT`      | `8000`                              | vLLM API port                  |
-| `LOG_DIR`        | `lmcache/logs/<profile>`            | Log files directory            |
-| `HF_MOUNT_BIN`   | `hf-mount/target/release/hf-mount-nfs` | Path to hf-mount-nfs binary |
-
-Model-specific settings (`MODEL`, `TP_SIZE`, `MAX_MODEL_LEN`, etc.) are
-set by the profile and should not normally be overridden.

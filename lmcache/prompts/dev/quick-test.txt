@@ -1,5 +1,0 @@
-Read src/setup.rs and explain the main struct and its fields.
----
-Write a unit test for the struct you just described.
-===
-Summarize what you wrote in one sentence.
