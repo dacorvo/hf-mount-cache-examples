@@ -1,0 +1,21 @@
+Read src/hub_api.rs or any HTTP client code in the project. Write a complete Rust HTTP API client library for HuggingFace Hub with typed request/response models for all bucket operations.
+---
+Add retry logic with exponential backoff, circuit breaker pattern, and request rate limiting to the API client. Write the full implementation.
+---
+Write a complete mock HTTP server for testing the API client. Support configurable responses, latency simulation, and error injection.
+---
+Write a CLI tool that uses the API client to manage HuggingFace buckets: list, create, delete, upload, download, and sync operations.
+---
+Write comprehensive API documentation with examples for every endpoint. Include curl examples, Rust code examples, and error response documentation.
+---
+Write a token management system for the API client: token refresh, secure storage, multiple account support, and environment variable fallback.
+---
+Write a parallel upload/download manager that handles large files with multipart uploads, resumable transfers, and progress reporting.
+---
+Write a complete integration test suite that runs against the mock server and verifies every API operation including edge cases and error handling.
+===
+What HTTP status codes does the retry logic handle and which ones should it not retry?
+---
+Summarize the CLI commands: name and one-line description for each.
+---
+List the environment variables the token manager checks, in priority order.

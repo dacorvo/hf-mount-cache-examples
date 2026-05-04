@@ -227,6 +227,14 @@ cmd_bucket_overlay() {
   run_phase "bucket-overlay" "consume" --mount-overlay
 }
 
+cmd_bucket_single() {
+  local cfg="$LOG_DIR/lmcache_config_bucket.yaml"
+  [ -f "$cfg" ] || write_lmcache_config "$LMCACHE_BUCKET_PATH" "$cfg"
+  export LMCACHE_CONFIG_FILE="$cfg"
+  export CACHE_DIR_OVERRIDE="$LMCACHE_BUCKET_PATH"
+  run_phase "bucket-single" "single" --mount-overlay
+}
+
 # ── Utility commands ──────────────────────────────────────────────────
 
 cmd_status() {
@@ -364,6 +372,7 @@ case "${1:-help}" in
   bucket-warmup)    cmd_bucket_warmup ;;
   bucket-rw)        cmd_bucket_rw ;;
   bucket-overlay)   cmd_bucket_overlay ;;
+  bucket-single)    cmd_bucket_single ;;
   status)           shift; cmd_status "$@" ;;
   teardown)         cmd_teardown ;;
   clear-bucket)     cmd_clear_bucket ;;
@@ -390,6 +399,7 @@ Phases (6 parallel conversations each, orchestrated by process-compose):
   bucket-warmup    Read-write mount. Populate cache in the bucket.
   bucket-rw        Read-write mount. Consume cache from the bucket.
   bucket-overlay   Overlay mount. Consume cache from the bucket.
+  bucket-single    Overlay mount. One opencode session against warm bucket (read-only on remote).
 
 Batch:
   run-all          Run all 7 phases for the current profile.
