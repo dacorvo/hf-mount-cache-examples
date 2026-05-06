@@ -26,6 +26,15 @@ Three phases:
 > overlay — RW would upload the new shape's artifacts back to the
 > bucket. The test uses overlay for the consume phase.
 
+> **Why overlay matters even for cache hits.** Inductor rewrites a few
+> metadata files (autotuning `.best_config`, codegen `.py`) on every
+> compile call — even when the on-disk cache is a perfect hit. A
+> read-only mount would fail outright on these writes. A read-write
+> mount would silently push them back to the bucket, creating write
+> contention and potentially overwriting the producer's autotuning
+> results with machine-specific values. Overlay mode absorbs these
+> writes locally, keeping the bucket pristine.
+
 ## Prerequisites
 
 NVIDIA GPU with CUDA (or CPU for a slow but functional smoke test),
@@ -65,14 +74,15 @@ The primary signal is **`cache_files_added`** for each shape — the
 number of new files that appeared in `TORCHINDUCTOR_CACHE_DIR` during
 that shape's compile call:
 
-- A real Inductor cache hit writes **zero** new files.
-- A miss / recompile writes ~30+ new files per shape (`.cpp`, `.so`,
-  FX graph, AOTAutograd entry, etc).
+- A real Inductor cache hit writes only a handful of metadata files
+  (autotuning `.best_config`, codegen `.py`).
+- A miss / recompile writes hundreds of new files per shape (Triton
+  kernels, FX graphs, AOTAutograd entries, etc).
 
-So in `consume`:
-
-- **HIT** for warmup shapes when `cache_files_added == 0`.
-- **RECOMPILE** for the new shape when `cache_files_added > 0`.
+Rather than a fixed threshold, verify compares each warmup shape's
+`cache_files_added` against the recompile shape from the same run.
+A hit must add less than 5 % of the recompile file count. This is
+self-calibrating across platforms and torch versions.
 
 First-call latency is shown for context but is **not** used as the
 verdict, because under overlay + NFS the first call also pays for

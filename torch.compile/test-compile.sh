@@ -243,20 +243,29 @@ cmd_verify() {
 
   # 2. Verify warmup shapes were cache hits in consume.
   #
-  # Primary signal: cache_files_added. A real Inductor cache hit writes
-  # zero new files; a miss writes ~30+ per shape. First-call latency is
-  # informational only — under overlay+NFS the lazy fetch of cache bytes
-  # can dominate, sometimes pushing first-call wall time close to a cold
-  # recompile, especially for small models.
+  # Signal: cache_files_added. A cache hit writes far fewer files than a
+  # recompile (metadata only vs. Triton kernels, FX graphs, etc.).
+  # Rather than a fixed threshold we compare each hit shape against the
+  # recompile shape from the same run — a hit must add < 5% of the
+  # recompile file count. This is self-calibrating across platforms.
   if [ -f "$LOG_DIR/results-warmup.json" ] && [ -f "$LOG_DIR/results-consume.json" ]; then
     python3 - "$LOG_DIR/results-warmup.json" "$LOG_DIR/results-consume.json" <<'PY' || pass=false
 import json, sys
 warm = json.load(open(sys.argv[1]))
 cons = json.load(open(sys.argv[2]))
 warm_by = {s["shape"]: s for s in warm["shapes"]}
+# Use the recompile shape (not in warmup) as the baseline.
+recompile_added = max(
+    (s["cache_files_added"] for s in cons["shapes"] if s["shape"] not in warm_by),
+    default=0,
+)
+if recompile_added == 0:
+    print("  ERROR: no recompile shape found — cannot calibrate hit threshold")
+    sys.exit(1)
 ok = True
 print(f"  Warmup cache: {warm['cache_files_total']} files, {warm['cache_size_total']}")
 print(f"  Consume cache (post-run): {cons['cache_files_total']} files, {cons['cache_size_total']}")
+print(f"  Recompile baseline: {recompile_added} files")
 print(f"  {'shape':<8} {'warm_first':>11} {'cons_first':>11} {'cons_2nd':>10} {'files_added':>12}  result")
 for s in cons["shapes"]:
     shape = s["shape"]
@@ -264,7 +273,7 @@ for s in cons["shapes"]:
     if shape in warm_by:
         w = warm_by[shape]["first_call_s"]
         c = s["first_call_s"]
-        is_hit = added == 0
+        is_hit = added < recompile_added * 0.05
         verdict = "HIT " if is_hit else "MISS"
         if not is_hit:
             ok = False
