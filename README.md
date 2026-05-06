@@ -64,7 +64,7 @@ Each subdirectory has its own README detailing its specifics.
 ## Quick start
 
 ```bash
-# Shared setup: hf-mount submodule + build, venv with vLLM
+# Shared setup: install hf-mount, venv with vLLM
 ./setup.sh
 source .venv/bin/activate
 
@@ -81,8 +81,7 @@ see [`lmcache/README.md`](lmcache/README.md).
 ## Repository structure
 
 ```
-├── setup.sh           # shared: submodule init, build hf-mount, venv with vLLM
-├── hf-mount/          # git submodule (huggingface/hf-mount)
+├── setup.sh           # shared: install hf-mount, venv with vLLM
 ├── lmcache/           # LMCache prefix-cache test
 │   ├── setup.sh
 │   ├── test-cache.sh  # CLI: warmup / consume / verify / status / clear-bucket / teardown
@@ -97,6 +96,5 @@ see [`lmcache/README.md`](lmcache/README.md).
 
 - NVIDIA GPU (16+ GB VRAM for `torch.compile`, 24+ GB for `lmcache`)
 - CUDA 12.1+
-- Rust toolchain (cargo)
 - Python 3.10+
 - HuggingFace token with access to the chosen bucket

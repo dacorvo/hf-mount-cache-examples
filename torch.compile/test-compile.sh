@@ -14,7 +14,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../hf-mount" && pwd)"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/../.venv}"
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
@@ -28,7 +27,7 @@ export MODEL="${MODEL:-unsloth/Llama-3.2-1B-Instruct}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-torch-compile}"
 export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-torch-compile}"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount-nfs}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount-nfs || echo "$HOME/.local/bin/hf-mount-nfs")}"
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
 

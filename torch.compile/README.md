@@ -29,10 +29,10 @@ Three phases:
 ## Prerequisites
 
 NVIDIA GPU with CUDA (or CPU for a slow but functional smoke test),
-Rust toolchain, Python 3.10+. From the repo root:
+Python 3.10+. From the repo root:
 
 ```bash
-./setup.sh                       # build hf-mount-nfs (claude/rebase-overlay-on-main)
+./setup.sh                       # install hf-mount, venv with vLLM
 source .venv/bin/activate
 cd torch.compile
 ./setup.sh                       # install torch + transformers
@@ -101,7 +101,7 @@ Silicon CPU is roughly 90 s warmup + 90 s consume.
 | `BUCKET`             | `dacorvo/torch-compile-cache`               |
 | `MOUNT_POINT`        | `/tmp/hf-mount-torch-compile`               |
 | `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-torch-compile`         |
-| `HF_MOUNT_BIN`       | `../hf-mount/target/release/hf-mount-nfs`   |
+| `HF_MOUNT_BIN`       | `~/.local/bin/hf-mount-nfs`                 |
 | `LOG_DIR`            | `torch.compile/logs`                        |
 
 To change the input shapes, edit `SHAPES_WARMUP` and `SHAPES_RECOMPILE`

@@ -11,7 +11,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../hf-mount" && pwd)"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/../.venv}"
 PC_BIN="${PC_BIN:-$SCRIPT_DIR/../bin/process-compose}"
 
@@ -44,7 +43,7 @@ export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-${PROFILE_N
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs/$PROFILE_NAME}"
 export VLLM_PORT="${VLLM_PORT:-8000}"
 export VLLM_URL="http://localhost:$VLLM_PORT"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$REPO_ROOT/target/release/hf-mount}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || echo "$HOME/.local/bin/hf-mount")}"
 export LMCACHE_BUCKET_PATH="$MOUNT_POINT/$PROFILE_NAME"
 
 if [ -z "${HF_TOKEN:-}" ]; then

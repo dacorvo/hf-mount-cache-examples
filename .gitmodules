@@ -1,4 +1,0 @@
-[submodule "hf-mount"]
-	path = hf-mount
-	url = git@github.com:dacorvo/hf-mount.git
-	branch = claude/rebase-overlay-on-main

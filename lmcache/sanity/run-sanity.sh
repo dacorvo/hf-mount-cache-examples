@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$SCRIPT_DIR/../../hf-mount/target/release/hf-mount}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || echo "$HOME/.local/bin/hf-mount")}"
 export HF_TOKEN="${HF_TOKEN:-$(cat ~/.cache/huggingface/token 2>/dev/null)}"
 PC_BIN="${PC_BIN:-$SCRIPT_DIR/../../bin/process-compose}"
 

@@ -28,11 +28,10 @@ prefix coverage, not a trivial whole-prompt match.
 
 ## Prerequisites
 
-NVIDIA GPU with CUDA 12.1+, Rust toolchain, Python 3.10+. From the repo
-root:
+NVIDIA GPU with CUDA 12.1+, Python 3.10+. From the repo root:
 
 ```bash
-./setup.sh                       # builds hf-mount, venv with vLLM
+./setup.sh                       # install hf-mount, venv with vLLM
 source .venv/bin/activate
 cd lmcache && ./setup.sh         # installs LMCache
 ```
@@ -129,7 +128,7 @@ Three checks, all must pass:
 | `BUCKET`             | `dacorvo/lm-cache`                               |
 | `MOUNT_POINT`        | `/tmp/hf-mount-lmcache`                          |
 | `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-<profile>`                  |
-| `HF_MOUNT_BIN`       | `../hf-mount/target/release/hf-mount` (wrapper)  |
+| `HF_MOUNT_BIN`       | `~/.local/bin/hf-mount`                           |
 | `VLLM_PORT`          | `8000`                                           |
 | `LOG_DIR`            | `lmcache/logs/<profile>` (gitignored)            |
 
