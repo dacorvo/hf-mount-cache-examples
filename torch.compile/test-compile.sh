@@ -23,7 +23,11 @@ fi
 
 # ── Configuration ────────────────────────────────────────────────────
 
-export MODEL="${MODEL:-unsloth/Llama-3.2-1B-Instruct}"
+export MODEL="${MODEL:-google/gemma-4-E4B-it}"
+export DTYPE="${DTYPE:-bfloat16}"
+# Single-GPU only — device_map="auto" + accelerate hooks break torch.compile's
+# fullgraph=True requirement (hooks call torch.compiler.disable).
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-torch-compile}"
 export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-torch-compile}"
@@ -31,12 +35,13 @@ export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || echo "$HOME/.local
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
 
-# Shape sets:
+# Shape sets — BxC where C is prefill_chunk_size. Distinct chunk sizes
+# produce distinct compiled prefill kernels (one per chunk shape); decode
+# kernels are shape-flexible across cache_len, so we only vary chunk size.
 #   - SHAPES_WARMUP: compiled during phase 1 (mount RW), uploaded to bucket
-#   - SHAPES_CONSUME: re-run during phase 2; subset of SHAPES_WARMUP must be cache hits
-#   - SHAPES_RECOMPILE: new shape during phase 2, must trigger recompile (local-only under overlay)
-SHAPES_WARMUP=("1x16" "1x32")
-SHAPES_RECOMPILE=("1x64")
+#   - SHAPES_RECOMPILE: new chunk size during phase 2, must recompile (local-only under overlay)
+SHAPES_WARMUP=("1x64" "1x128")
+SHAPES_RECOMPILE=("1x256")
 
 if [ -z "${HF_TOKEN:-}" ]; then
   if [ -f "$HOME/.cache/huggingface/token" ]; then
@@ -143,7 +148,7 @@ cmd_warmup() {
 
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
-  local args=(--model "$MODEL" --output "$LOG_DIR/results-warmup.json" --phase warmup)
+  local args=(--model "$MODEL" --dtype "$DTYPE" --output "$LOG_DIR/results-warmup.json" --phase warmup)
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
 
   python3 "$SCRIPT_DIR/compile_run.py" "${args[@]}"
@@ -180,7 +185,7 @@ cmd_consume() {
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
   # Re-run warmup shapes (expect cache hits via bucket) + recompile shapes.
-  local args=(--model "$MODEL" --output "$LOG_DIR/results-consume.json" --phase consume)
+  local args=(--model "$MODEL" --dtype "$DTYPE" --output "$LOG_DIR/results-consume.json" --phase consume)
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
   for s in "${SHAPES_RECOMPILE[@]}"; do args+=(--shape "$s"); done
 
