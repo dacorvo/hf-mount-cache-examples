@@ -27,7 +27,7 @@ export MODEL="${MODEL:-unsloth/Llama-3.2-1B-Instruct}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-torch-compile}"
 export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-torch-compile}"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount-nfs || echo "$HOME/.local/bin/hf-mount-nfs")}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || echo "$HOME/.local/bin/hf-mount")}"
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
 
@@ -52,78 +52,61 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 
 # ── hf-mount lifecycle ───────────────────────────────────────────────
 
+# Lifecycle goes through the `hf-mount` wrapper — `hf-mount start` daemonizes
+# the backend, `hf-mount stop` performs a coordinated unmount. NEVER call
+# umount on the mount point and NEVER kill the backend (hf-mount-nfs /
+# hf-mount-fuse) directly: both leave a phantom NFS mount that hangs the
+# system and requires a reboot. See AGENTS.md.
 start_hf_mount() {
   local mode="$1"  # rw | overlay
-  [ -x "$HF_MOUNT_BIN" ] || die "Binary not found at $HF_MOUNT_BIN — run the root setup.sh first"
+  [ -x "$HF_MOUNT_BIN" ] || die "Binary not found at $HF_MOUNT_BIN — run ./setup.sh first"
   [ -n "${HF_TOKEN:-}" ] || die "HF_TOKEN is not set"
 
   local extra_arg=""
   case "$mode" in
-    rw)      extra_arg="" ;;
-    overlay) extra_arg="--overlay" ;;
+    # --advanced-writes: staging files + async batched flush. Without it,
+    # every close() is a synchronous upload — kills Inductor (tens of
+    # thousands of small file writes during compile).
+    rw)      extra_arg="--advanced-writes" ;;
+    overlay) extra_arg="--overlay" ;;  # implies --advanced-writes; never pushes to remote
     *)       die "unknown mount mode: $mode" ;;
   esac
 
   mkdir -p "$MOUNT_POINT" "$HF_MOUNT_CACHE_DIR"
 
-  # Stop any previous instance via SIGTERM (NEVER call umount on hf-mount NFS).
-  if [ -f "$LOG_DIR/hf-mount.pid" ]; then
-    local old_pid
-    old_pid="$(cat "$LOG_DIR/hf-mount.pid")"
-    if kill -0 "$old_pid" 2>/dev/null; then
-      log "Stopping previous hf-mount (pid $old_pid)"
-      kill "$old_pid" 2>/dev/null || true
-      for _ in $(seq 1 30); do
-        kill -0 "$old_pid" 2>/dev/null || break
-        sleep 1
-      done
-    fi
-    rm -f "$LOG_DIR/hf-mount.pid"
+  # If a previous daemon is still attached to this mount point, stop it
+  # through the wrapper. NEVER `kill` the backend or `umount` the path.
+  if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
+    log "Previous mount detected at $MOUNT_POINT — stopping via hf-mount wrapper"
+    "$HF_MOUNT_BIN" stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || true
   fi
 
-  log "Mounting $BUCKET at $MOUNT_POINT (mode=$mode)"
+  log "Starting hf-mount daemon: $BUCKET at $MOUNT_POINT (mode=$mode)"
   RUST_LOG=hf_mount=info \
-    "$HF_MOUNT_BIN" \
-    --hf-token "$HF_TOKEN" \
-    --cache-dir "$HF_MOUNT_CACHE_DIR" \
-    $extra_arg \
-    bucket "$BUCKET" "$MOUNT_POINT" \
-    >> "$LOG_DIR/hf-mount.log" 2>&1 &
-
-  local pid=$!
-  echo "$pid" > "$LOG_DIR/hf-mount.pid"
+    "$HF_MOUNT_BIN" start -- \
+      --hf-token "$HF_TOKEN" \
+      --cache-dir "$HF_MOUNT_CACHE_DIR" \
+      $extra_arg \
+      bucket "$BUCKET" "$MOUNT_POINT" \
+      >> "$LOG_DIR/hf-mount.log" 2>&1
 
   for i in $(seq 1 30); do
-    if mount | grep -q "$MOUNT_POINT" 2>/dev/null \
-       || (grep -q "$MOUNT_POINT" /proc/mounts 2>/dev/null); then
+    if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
       log "Mount ready after ${i}s"
       return 0
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      tail -50 "$LOG_DIR/hf-mount.log" >&2
-      die "hf-mount exited unexpectedly"
-    fi
     sleep 1
   done
-  die "Mount not ready after 30s"
+  die "Mount not ready after 30s — check $LOG_DIR/hf-mount.log"
 }
 
 stop_hf_mount() {
-  if [ -f "$LOG_DIR/hf-mount.pid" ]; then
-    local pid
-    pid="$(cat "$LOG_DIR/hf-mount.pid")"
-    if kill -0 "$pid" 2>/dev/null; then
-      log "Stopping hf-mount (pid $pid)"
-      kill "$pid" 2>/dev/null || true
-      for _ in $(seq 1 30); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 1
-      done
-      if kill -0 "$pid" 2>/dev/null; then
-        log "WARNING: hf-mount pid $pid still alive after 30s"
-      fi
-    fi
-    rm -f "$LOG_DIR/hf-mount.pid"
+  # Always go through the wrapper. NEVER `kill` the backend; that leaves a
+  # phantom NFS mount that requires reboot to recover from.
+  if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
+    log "Stopping hf-mount daemon for $MOUNT_POINT (coordinated unmount)"
+    "$HF_MOUNT_BIN" stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || \
+      log "WARNING: hf-mount stop reported an error — check $LOG_DIR/hf-mount.log"
   fi
 }
 

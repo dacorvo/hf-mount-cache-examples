@@ -111,7 +111,7 @@ Silicon CPU is roughly 90 s warmup + 90 s consume.
 | `BUCKET`             | `dacorvo/torch-compile-cache`               |
 | `MOUNT_POINT`        | `/tmp/hf-mount-torch-compile`               |
 | `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-torch-compile`         |
-| `HF_MOUNT_BIN`       | `~/.local/bin/hf-mount-nfs`                 |
+| `HF_MOUNT_BIN`       | `~/.local/bin/hf-mount` (the wrapper)       |
 | `LOG_DIR`            | `torch.compile/logs`                        |
 
 To change the input shapes, edit `SHAPES_WARMUP` and `SHAPES_RECOMPILE`
