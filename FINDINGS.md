@@ -2,19 +2,32 @@
 
 ## The per-file overhead floor
 
-HF Storage Buckets (xet-backed) impose a per-file overhead — manifest
-update, content-address lookup, xorb commit — that does not amortize
-with file size. Measured on this setup:
+HF Storage Buckets are xet-backed: file content is content-addressed
+and shipped in batched xorbs, but each file still pays a metadata
+roundtrip. Measured rates differ by access path:
 
-| Direction | Rate |
+| Access path | Rate |
 |---|---|
 | Producer-through-mount upload (hf-mount, `--advanced-writes`) | ~7 files/sec |
-| Consumer-via-direct-API download (`huggingface_hub.sync_bucket`) | ~8 files/sec |
-| Effective throughput at 75 KB avg | ~500 KB/s |
+| Direct API upload (`HfApi.sync_bucket`, local → bucket) | ~51 files/sec |
+| Direct API download (`HfApi.sync_bucket`, bucket → local, cold xet) | ~16 files/sec, **highly variable** |
 | File listing (`list_bucket_tree`) | ~5,000 files / 3.6 s |
 
-It's the same ceiling regardless of access method, so it's not an
-hf-mount property — it's a property of the bucket / xet storage layer.
+The per-file ceiling is a property of the **access path**, not the
+bucket itself. Direct `sync_bucket` batches per-xorb and is ~6× faster
+than the mount, which flushes each file individually under
+`--advanced-writes`. Two operational caveats matter for cache
+workloads:
+
+1. **Download is asymmetric with upload.** Same 2,642-file llama
+   payload: 51 s up, 166 s down (cold xet). xet uploads dedupe and
+   batch aggressively; downloads fan out per-file metadata fetches.
+
+2. **Download can hang.** Two back-to-back cold-xet fetches of the
+   same bucket, ~10 minutes apart, same client code: 166 s vs "no
+   file activity for 12 min, killed at 26 min". Bucket fetch
+   reliability under hub load is a real concern — applications need
+   their own retry/timeout layer.
 
 ## Cache value = produce_cost − fetch_cost
 
@@ -51,19 +64,63 @@ the cache is small and individually cheap to recompute; only the
 single `.so` (36 % of total bytes) and the `.best_config` files
 represent meaningful unique compute.
 
-Net producer cost: running the warmup through an hf-mount RW mount
-took **~30 minutes** to write what compiles in **~6 minutes** on local
-SSD (5.3× overhead, dominated by per-file flush throughput). On the
-consumer side, lazy-fetching even a *subset* still pays the per-file
-cost on each touched file.
+The original "~30 min producer through hf-mount RW vs 6 min local SSD"
+number we measured was a property of the **mount path**, not the
+bucket. Using direct `sync_bucket` upload for the same payload, a
+7,000-file cache uploads in ~140 s (51 files/sec). The bucket itself
+isn't the structural bottleneck we first thought.
 
-For this workload, fetch_cost ≥ produce_cost per file → the bucket
-loses to local recompute. This isn't a tuning problem; it's structural.
+What does keep this workload on the wrong side of `produce − fetch`:
+
+1. **Cold-consumer fetch is barely faster than fresh compile.**
+   Llama-3.2-3B (2,642-file cache): fresh compile 192 s, cold-xet
+   fetch 166 s. ~26 s saved — well within fetch-time variance.
+
+2. **Fetch latency has a long tail.** Same llama fetch from the same
+   bucket: 166 s in one run, indefinitely hung in another. You can't
+   put that on the consumer-cold-start critical path without a
+   fallback to fresh compile.
+
+3. **"Ship a subset" doesn't work.** See the next section — stripping
+   the per-kernel `triton/` tree breaks consumer cache hits even on
+   local disk.
 
 By extension this rules out other dev-style compile caches with the
 same shape: JAX persistent cache, standalone Triton autotune cache,
 vLLM v0 compile cache — anything that emits many small intermediate
 artifacts.
+
+## Stripping `triton/` breaks consumer cache hits
+
+The asymmetric pattern that *should* have worked: compile locally,
+strip the `triton/` subtree (per-kernel files) before sync, ship only
+the FX-bundled entries to the bucket. For gemma this drops the cache
+from 7,033 files (191 MB) to 1,055 files (120 MB) — 6.7× fewer files
+to handle. The premise (see appendix below) was that
+`TritonBundler.read_and_emit()` would unpack per-kernel files from
+the bundled FX entries on cache hit, so the strip should be
+transparent to the consumer.
+
+It isn't. Measured on local disk (no bucket, no overlay, just a
+populated `TORCHINDUCTOR_CACHE_DIR`):
+
+| Cache state | first_call_s | files added | files at end |
+|---|---|---|---|
+| Warm local, full | 41 | 132 | 7,301 |
+| Warm local, `triton/` stripped | **286** | **3,243** | **4,298** |
+
+The stripped cache forces Inductor to recompile ~3,000 kernels —
+286 s on the consumer's critical path, on plain local disk. Whatever
+guard sits in front of `read_and_emit()`, it doesn't engage when the
+on-disk `triton/` tree is absent.
+
+The 174 s and 401 s overlay measurements we collected earlier with
+the stripped bucket therefore weren't measuring bucket fetch — they
+were mostly measuring this same consumer-side recompile, plus
+~115 s of overlay/NFS overhead.
+
+Practical consequence: the bucket can't be shipped selectively. Pay
+for the full sync, or have the consumer recompile. No middle path.
 
 ## What does land on the right side
 
@@ -126,12 +183,21 @@ Read in `torch/_inductor/triton_bundler.py:117-131`
   `triton_cache_dir(device)`. Line 376 bails out if the directory is
   already non-empty.
 
-The flag makes FX cache entries self-contained (so a cache hit can
-reconstruct missing per-kernel files), but it **never suppresses the
-original per-kernel writes**. Those writes come from Triton's runtime
-before Inductor's bundler runs. On a bucket mount, the bucket sees
-the per-kernel files first, then the bundled FX entry containing a
-copy.
+The flag was intended to make FX cache entries self-contained, but it
+**never suppresses the original per-kernel writes**. Those writes
+come from Triton's runtime before Inductor's bundler runs. On a
+bucket mount, the bucket sees the per-kernel files first, then the
+bundled FX entry containing a copy.
+
+> **Correction.** The original reading of this code claimed a cache
+> hit can reconstruct missing per-kernel files from the bundle. The
+> strip experiment (see "Stripping `triton/` breaks consumer cache
+> hits" above) contradicts that: removing the on-disk `triton/` tree
+> forces Inductor to recompile, not unpack from the bundle. Either
+> the FX cache lookup doesn't engage when the kernel tree is missing,
+> or `read_and_emit` is called but doesn't fully restore. Either way,
+> the bundle is not a substitute for the on-disk per-kernel files
+> from the consumer's perspective.
 
 ### `bundled_autotune_remote_cache`
 
