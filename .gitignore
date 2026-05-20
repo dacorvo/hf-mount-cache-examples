@@ -1,4 +1,5 @@
 .venv/
 .claude/
 torch.compile/logs/
+torch.compile/experiments/
 __pycache__/
