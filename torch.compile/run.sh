@@ -28,7 +28,17 @@ export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 MOUNT_POINT="/tmp/hf-mount-torch-compile"
 HF_MOUNT_CACHE_DIR="/tmp/hf-mount-cache-torch-compile"
 LOG_DIR="$SCRIPT_DIR/logs"
-export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
+
+# Inductor artifacts are not portable across GPU compute capabilities or CPU
+# architectures, so the bucket subpath has to be hardware-specific — otherwise
+# two hosts sharing the bucket would clobber each other.
+CUDA_CAP="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ')"
+if [ -n "$CUDA_CAP" ]; then
+  HW_TAG="cuda-sm$CUDA_CAP"
+else
+  HW_TAG="cpu-$(uname -m)"
+fi
+export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor/$HW_TAG"
 
 # Shape sets — BxC where C is prefill_chunk_size. Distinct chunk sizes
 # produce distinct compiled prefill kernels (one per chunk shape); decode
