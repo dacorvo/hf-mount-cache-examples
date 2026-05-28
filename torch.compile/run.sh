@@ -28,10 +28,10 @@ export DTYPE="${DTYPE:-bfloat16}"
 # fullgraph=True requirement (hooks call torch.compiler.disable).
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
-export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-torch-compile}"
-export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-torch-compile}"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || true)}"
-export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
+
+MOUNT_POINT="/tmp/hf-mount-torch-compile"
+HF_MOUNT_CACHE_DIR="/tmp/hf-mount-cache-torch-compile"
+LOG_DIR="$SCRIPT_DIR/logs"
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
 
 # Shape sets — BxC where C is prefill_chunk_size. Distinct chunk sizes
@@ -63,7 +63,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 # system and requires a reboot. See AGENTS.md.
 start_hf_mount() {
   local mode="$1"  # rw | overlay
-  [ -n "$HF_MOUNT_BIN" ] && [ -x "$HF_MOUNT_BIN" ] || die "hf-mount not found on PATH — run ./setup.sh or 'brew install hf-mount'"
+  command -v hf-mount >/dev/null || die "hf-mount not found on PATH — run ./setup.sh or 'brew install hf-mount'"
   [ -n "${HF_TOKEN:-}" ] || die "HF_TOKEN is not set"
 
   local extra_arg=""
@@ -82,12 +82,12 @@ start_hf_mount() {
   # through the wrapper. NEVER `kill` the backend or `umount` the path.
   if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
     log "Previous mount detected at $MOUNT_POINT — stopping via hf-mount wrapper"
-    "$HF_MOUNT_BIN" stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || true
+    hf-mount stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || true
   fi
 
   log "Starting hf-mount daemon: $BUCKET at $MOUNT_POINT (mode=$mode)"
   RUST_LOG=hf_mount=info \
-    "$HF_MOUNT_BIN" start -- \
+    hf-mount start -- \
       --hf-token "$HF_TOKEN" \
       --cache-dir "$HF_MOUNT_CACHE_DIR" \
       $extra_arg \
@@ -109,7 +109,7 @@ stop_hf_mount() {
   # phantom NFS mount that requires reboot to recover from.
   if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
     log "Stopping hf-mount daemon for $MOUNT_POINT (coordinated unmount)"
-    "$HF_MOUNT_BIN" stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || \
+    hf-mount stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || \
       log "WARNING: hf-mount stop reported an error — check $LOG_DIR/hf-mount.log"
   fi
 }
@@ -211,11 +211,8 @@ Utilities:
 
 Environment:
   MODEL                $MODEL
+  DTYPE                $DTYPE
   BUCKET               $BUCKET
-  MOUNT_POINT          $MOUNT_POINT
-  HF_MOUNT_CACHE_DIR   $HF_MOUNT_CACHE_DIR
-  HF_MOUNT_BIN         $HF_MOUNT_BIN
-  LOG_DIR              $LOG_DIR
 EOF
     ;;
 esac

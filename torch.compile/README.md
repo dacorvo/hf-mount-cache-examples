@@ -38,7 +38,7 @@ source ../.venv/bin/activate
 Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
 
 Each phase writes a JSON report (`results-warmup.json`,
-`results-consume.json`) to `LOG_DIR` with per-shape first-call and
+`results-consume.json`) under `logs/` with per-shape first-call and
 second-call timings plus `cache_files_added` — a real cache hit writes
 only a handful of metadata files (autotuning `.best_config`, codegen
 `.py`); a miss writes hundreds of Triton kernels, FX graphs, etc.
@@ -48,13 +48,11 @@ only a handful of metadata files (autotuning `.best_config`, codegen
 | Variable             | Default                              |
 |----------------------|--------------------------------------|
 | `MODEL`              | `google/gemma-4-E4B-it`              |
+| `DTYPE`              | `bfloat16`                           |
 | `BUCKET`             | `dacorvo/torch-compile-cache`        |
-| `MOUNT_POINT`        | `/tmp/hf-mount-torch-compile`        |
-| `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-torch-compile`  |
-| `LOG_DIR`            | `torch.compile/logs`                 |
 
-Shape sets (`SHAPES_WARMUP`, `SHAPES_RECOMPILE`) are at the top of
-`run.sh`.
+Shape sets (`SHAPES_WARMUP`, `SHAPES_RECOMPILE`) and the mount/cache
+paths (under `/tmp`) are at the top of `run.sh`.
 
 ## Caveats
 
