@@ -169,16 +169,19 @@ cmd_teardown() {
 }
 
 cmd_clear_bucket() {
-  log "Clearing bucket $BUCKET"
+  # Scope deletion to this host's hardware subtree — Inductor caches for other
+  # GPUs / archs live under sibling prefixes and must not be touched.
+  local prefix="inductor/$HW_TAG"
+  log "Clearing $BUCKET under $prefix/"
   uv run --quiet --with "huggingface_hub>=1.0" python - <<EOF
 from huggingface_hub import HfApi
 api = HfApi()
-files = [f.path for f in api.list_bucket_tree("$BUCKET", recursive=True) if hasattr(f, "size")]
+files = [f.path for f in api.list_bucket_tree("$BUCKET", prefix="$prefix", recursive=True) if hasattr(f, "size")]
 if files:
     api.batch_bucket_files("$BUCKET", delete=files)
     print(f"Deleted {len(files)} files.")
 else:
-    print("Bucket already empty.")
+    print("Nothing under $prefix/ — bucket subtree already empty.")
 EOF
 }
 
