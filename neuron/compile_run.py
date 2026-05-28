@@ -24,12 +24,6 @@ from pathlib import Path
 MAX_NEW_TOKENS = 8
 PROMPT = "The future of AI is"
 
-os.environ.setdefault("RANK", "0")
-os.environ.setdefault("LOCAL_RANK", "0")
-os.environ.setdefault("WORLD_SIZE", "1")
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29500")
-
 
 def parse_shape(s: str) -> tuple[int, int]:
     b, c = s.split("x")
@@ -68,12 +62,8 @@ def main() -> None:
     args = ap.parse_args()
 
     import torch
-    import torch.distributed as dist
     from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
     from transformers.generation.configuration_utils import CompileConfig
-
-    if not dist.is_initialized():
-        dist.init_process_group(backend="neuron")
 
     cache_dir = os.environ.get("TORCH_NEURONX_NEFF_CACHE_DIR", "<unset>")
     print(f"[compile_run] TORCH_NEURONX_NEFF_CACHE_DIR = {cache_dir}", flush=True)
