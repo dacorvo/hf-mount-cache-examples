@@ -11,15 +11,20 @@ local.
 kernels, FX graphs, etc.) to a chosen directory. Pointing it inside an
 `hf-mount` mount makes the cache shared.
 
-| Phase    | Mount    | Action                                              | Bucket effect            |
-|----------|----------|-----------------------------------------------------|--------------------------|
-| warmup   | rw       | Compile two warmup shapes                           | Artifacts uploaded       |
-| consume  | overlay  | Rerun warmup shapes (cache hit) + compile new shape | Unchanged (local writes) |
+| Phase    | Mount    | Action                                                 | Bucket effect            |
+|----------|----------|--------------------------------------------------------|--------------------------|
+| warmup   | rw       | Compile each shape in `SHAPES`                         | Artifacts uploaded       |
+| consume  | overlay  | Run each shape; cache hit if a prior warmup ran        | Unchanged (local writes) |
 
-Overlay matters even for cache hits: Inductor rewrites a few metadata
+The scenario the example exercises is `warmup + consume` (consumer
+hits the bucket cache, fast first call) versus `consume alone`
+(consumer compiles cold, slow first call). Compare
+`results-consume.json`'s `first_call_s` between the two runs.
+
+Overlay matters even on a cache hit: Inductor rewrites a few metadata
 files on every compile call (autotuning `.best_config`, codegen `.py`)
-even on a perfect on-disk hit. Overlay absorbs those writes locally so
-the bucket stays pristine.
+even when the on-disk cache matches. Overlay absorbs those writes
+locally so the bucket stays pristine.
 
 ## Running
 
@@ -32,7 +37,13 @@ on first invocation — no manual venv to activate.
 
 ```bash
 ./setup.sh                       # one-time: install hf-mount + uv
-./run.sh clear-bucket            # optional clean slate
+
+# Cold consume (no warmup): measure the bare compile cost.
+./run.sh clear-bucket
+./run.sh consume
+
+# Warm consume: warmup populates the bucket, consume hits it.
+./run.sh clear-bucket
 ./run.sh run-all                 # warmup + consume
 ```
 
@@ -51,15 +62,15 @@ only a handful of metadata files (autotuning `.best_config`, codegen
 | `MODEL`              | `HuggingFaceTB/SmolLM2-135M-Instruct` |
 | `BUCKET`             | `dacorvo/torch-compile-cache`        |
 
-Shape sets (`SHAPES_WARMUP`, `SHAPES_RECOMPILE`) and the mount/cache
-paths (under `/tmp`) are at the top of `run.sh`.
+The `SHAPES` list and the mount path (under `/tmp`) are at the top of
+`run.sh`.
 
 ## Caveats
 
-This example demonstrates the mechanism end-to-end (overlay semantics,
-bucket invariance, recompile isolation), but the Inductor JIT cache's
-file profile does not flatter the bucket-sync path. Two effects to
-know about before generalizing the pattern to other workloads:
+This example exercises the warmup → consume cache-reuse flow, but the
+Inductor JIT cache's file profile does not flatter the bucket-sync
+path. Two effects to know about before generalizing the pattern to
+other workloads:
 
 ### 1. Compile mode dramatically changes file count
 

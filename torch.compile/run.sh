@@ -3,8 +3,8 @@
 # CLI for hf-mount + torch.compile cache integration test.
 #
 # Phases:
-#   warmup   — mount RW, compile shapes A and B, artifacts upload to bucket
-#   consume  — mount overlay, rerun A and B (cache hit), then C (recompile, local-only)
+#   warmup   — mount RW, compile SHAPES, artifacts upload to bucket
+#   consume  — mount overlay, run SHAPES (cache hit if warmup ran first)
 #   teardown — stop hf-mount, leave caches in place
 #
 # Usage:
@@ -38,13 +38,10 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor/$HW_TAG"
 
-# Shape sets — BxC where C is prefill_chunk_size. Distinct chunk sizes
-# produce distinct compiled prefill kernels (one per chunk shape); decode
-# kernels are shape-flexible across cache_len, so we only vary chunk size.
-#   - SHAPES_WARMUP: compiled during phase 1 (mount RW), uploaded to bucket
-#   - SHAPES_RECOMPILE: new chunk size during phase 2, must recompile (local-only under overlay)
-SHAPES_WARMUP=("1x64" "1x128")
-SHAPES_RECOMPILE=("1x256")
+# Shapes — BxC where C is prefill_chunk_size. The same shape list is used
+# by warmup (compiles it, uploads to bucket) and consume (runs it under the
+# overlay mount, expects a cache hit if warmup ran first).
+SHAPES=("1x64")
 
 if [ -z "${HF_TOKEN:-}" ]; then
   if [ -f "$HOME/.cache/huggingface/token" ]; then
@@ -128,7 +125,7 @@ cmd_warmup() {
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
   local args=(--model "$MODEL" --output "$LOG_DIR/results-warmup.json" --phase warmup)
-  for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
+  for s in "${SHAPES[@]}"; do args+=(--shape "$s"); done
 
   uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 
@@ -140,7 +137,7 @@ cmd_warmup() {
 }
 
 cmd_consume() {
-  log "====== Phase: consume (overlay mount, cache hits + recompile) ======"
+  log "====== Phase: consume (overlay mount, cache hit if bucket warmed) ======"
 
   # Keep the mount point empty for a clean overlay layer.
   log "Clearing mount point"
@@ -151,10 +148,10 @@ cmd_consume() {
 
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
-  # Re-run warmup shapes (expect cache hits via bucket) + recompile shapes.
+  # Run each shape under the overlay mount. If warmup populated the bucket
+  # for the same shape, first_call_s should drop dramatically (cache hit).
   local args=(--model "$MODEL" --output "$LOG_DIR/results-consume.json" --phase consume)
-  for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
-  for s in "${SHAPES_RECOMPILE[@]}"; do args+=(--shape "$s"); done
+  for s in "${SHAPES[@]}"; do args+=(--shape "$s"); done
 
   uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 
@@ -202,11 +199,12 @@ case "${1:-help}" in
 Usage: $(basename "$0") <command>
 
 Phases:
-  warmup        Mount $BUCKET RW, compile shapes ${SHAPES_WARMUP[*]}, unmount.
+  warmup        Mount $BUCKET RW, compile shapes ${SHAPES[*]}, unmount.
                 Artifacts are uploaded to the bucket.
-  consume       Mount $BUCKET overlay, rerun warmup shapes (cache hits via
-                bucket), then compile new shapes ${SHAPES_RECOMPILE[*]} (recompile,
-                stays local). Bucket is NOT updated.
+  consume       Mount $BUCKET overlay, run shapes ${SHAPES[*]}. If warmup ran
+                first, first_call_s drops to a cache hit; otherwise it
+                compiles cold and the new artifacts stay local (bucket
+                unchanged).
   run-all       warmup + consume.
 
 Utilities:
