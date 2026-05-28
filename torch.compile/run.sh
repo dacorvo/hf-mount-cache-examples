@@ -31,12 +31,12 @@ LOG_DIR="$SCRIPT_DIR/logs"
 
 # Inductor artifacts are not portable across GPU compute capabilities or CPU
 # architectures, so the bucket subpath has to be hardware-specific — otherwise
-# two hosts sharing the bucket would clobber each other.
-CUDA_CAP="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ')"
-if [ -n "$CUDA_CAP" ]; then
-  HW_TAG="cuda-sm$CUDA_CAP"
-else
-  HW_TAG="cpu-$(uname -m)"
+# two hosts sharing the bucket would clobber each other. nvidia-smi may be
+# absent (macOS / CPU-only host), in which case we fall back to uname -m.
+HW_TAG="cpu-$(uname -m)"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  CUDA_CAP="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ' || true)"
+  [ -n "$CUDA_CAP" ] && HW_TAG="cuda-sm$CUDA_CAP"
 fi
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor/$HW_TAG"
 
