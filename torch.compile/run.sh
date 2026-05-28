@@ -26,7 +26,6 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 
 MOUNT_POINT="/tmp/hf-mount-torch-compile"
-HF_MOUNT_CACHE_DIR="/tmp/hf-mount-cache-torch-compile"
 LOG_DIR="$SCRIPT_DIR/logs"
 
 # Inductor artifacts are not portable across GPU compute capabilities or CPU
@@ -82,7 +81,7 @@ start_hf_mount() {
     *)       die "unknown mount mode: $mode" ;;
   esac
 
-  mkdir -p "$MOUNT_POINT" "$HF_MOUNT_CACHE_DIR"
+  mkdir -p "$MOUNT_POINT"
 
   # If a previous daemon is still attached to this mount point, stop it
   # through the wrapper. NEVER `kill` the backend or `umount` the path.
@@ -95,7 +94,6 @@ start_hf_mount() {
   RUST_LOG=hf_mount=info \
     hf-mount start -- \
       --hf-token "$HF_TOKEN" \
-      --cache-dir "$HF_MOUNT_CACHE_DIR" \
       $extra_arg \
       bucket "$BUCKET" "$MOUNT_POINT" \
       >> "$LOG_DIR/hf-mount.log" 2>&1
@@ -145,10 +143,8 @@ cmd_warmup() {
 cmd_consume() {
   log "====== Phase: consume (overlay mount, cache hits + recompile) ======"
 
-  # Wipe local hf-mount cache so cache hits must come from the bucket, not
-  # leftover chunks. Keep the mount point empty for a clean overlay.
-  log "Clearing local hf-mount cache + mount point"
-  rm -rf "$HF_MOUNT_CACHE_DIR"
+  # Keep the mount point empty for a clean overlay layer.
+  log "Clearing mount point"
   rm -rf "$MOUNT_POINT"
 
   start_hf_mount overlay
@@ -169,7 +165,7 @@ cmd_consume() {
 
 cmd_teardown() {
   stop_hf_mount
-  log "Teardown complete. Caches preserved in $MOUNT_POINT and $HF_MOUNT_CACHE_DIR."
+  log "Teardown complete. Mount point preserved at $MOUNT_POINT."
 }
 
 cmd_clear_bucket() {
