@@ -161,14 +161,7 @@ cmd_warmup() {
   trap - EXIT
 }
 
-# cmd_consume [<label>]
-#   Optional <label> tags the output file as results-consume-<label>.json so
-#   run-all can keep cold and warm passes side by side. Default label: empty,
-#   produces plain results-consume.json.
 cmd_consume() {
-  local label="${1:-}"
-  local out_file="$LOG_DIR/results-consume${label:+-$label}.json"
-
   log "====== Phase: consume (overlay mount, cache hit if bucket warmed) ======"
 
   # Stop any stale daemon FIRST — rm/ls on a live NFS mount hangs forever.
@@ -182,13 +175,30 @@ cmd_consume() {
 
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
-  local args=(--model "$MODEL" --output "$out_file" --phase consume)
+  local args=(--model "$MODEL" --output "$LOG_DIR/results-consume.json" --phase consume)
   for s in "${SHAPES[@]}"; do args+=(--shape "$s"); done
 
   uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 
   stop_hf_mount
   trap - EXIT
+}
+
+# Baseline: run compile_run.py with NO hf-mount and a fresh local Inductor
+# cache dir. Measures the raw cold-compile cost the bucket-backed flow has
+# to beat.
+cmd_vanilla() {
+  log "====== Phase: vanilla (no hf-mount, fresh local Inductor cache) ======"
+
+  local vanilla_cache="/tmp/inductor-vanilla"
+  rm -rf "$vanilla_cache"
+  mkdir -p "$vanilla_cache"
+
+  local args=(--model "$MODEL" --output "$LOG_DIR/results-vanilla.json" --phase vanilla)
+  for s in "${SHAPES[@]}"; do args+=(--shape "$s"); done
+
+  TORCHINDUCTOR_CACHE_DIR="$vanilla_cache" \
+    uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 }
 
 cmd_teardown() {
@@ -219,25 +229,24 @@ cmd_run_all() {
   # is there, so manual sequences keep their history.
   rm -rf "$LOG_DIR" && mkdir -p "$LOG_DIR"
 
-  log "====== Cold pass: consume against an empty bucket ======"
-  cmd_clear_bucket
-  cmd_consume cold
+  log "====== Baseline: vanilla compile (no hf-mount) ======"
+  cmd_vanilla
 
-  log "====== Warm pass: warmup populates the bucket, then consume ======"
+  log "====== With hf-mount: warmup populates the bucket, then consume ======"
   cmd_warmup
-  cmd_consume warm
+  cmd_consume
 
-  log "====== Summary: first_call_s, cold vs warm ======"
+  log "====== Summary: first_call_s, vanilla compile vs hf-mount cache hit ======"
   uv run --quiet python - <<EOF
 import json
-cold = json.load(open("$LOG_DIR/results-consume-cold.json"))
-warm = json.load(open("$LOG_DIR/results-consume-warm.json"))
+vanilla = json.load(open("$LOG_DIR/results-vanilla.json"))
+warm = json.load(open("$LOG_DIR/results-consume.json"))
 print()
-print(f"  {'shape':<10} {'cold_first_s':>14} {'warm_first_s':>14}  {'speedup':>10}")
-print(f"  {'-'*10:<10} {'-'*14:>14} {'-'*14:>14}  {'-'*10:>10}")
-for c, w in zip(cold["shapes"], warm["shapes"]):
-    speedup = c["first_call_s"] / w["first_call_s"] if w["first_call_s"] > 0 else float("inf")
-    print(f"  {c['shape']:<10} {c['first_call_s']:>14.2f} {w['first_call_s']:>14.2f}  {speedup:>9.1f}x")
+print(f"  {'shape':<10} {'vanilla_s':>11} {'cached_s':>11}  {'speedup':>10}")
+print(f"  {'-'*10:<10} {'-'*11:>11} {'-'*11:>11}  {'-'*10:>10}")
+for v, w in zip(vanilla["shapes"], warm["shapes"]):
+    speedup = v["first_call_s"] / w["first_call_s"] if w["first_call_s"] > 0 else float("inf")
+    print(f"  {v['shape']:<10} {v['first_call_s']:>11.2f} {w['first_call_s']:>11.2f}  {speedup:>9.1f}x")
 print()
 EOF
 }
@@ -245,6 +254,7 @@ EOF
 # ── Dispatch ─────────────────────────────────────────────────────────
 
 case "${1:-help}" in
+  vanilla)      cmd_vanilla ;;
   warmup)       cmd_warmup ;;
   consume)      cmd_consume ;;
   teardown)     cmd_teardown ;;
@@ -255,19 +265,21 @@ case "${1:-help}" in
 Usage: $(basename "$0") <command>
 
 Phases:
+  vanilla       Run shapes ${SHAPES[*]} with no hf-mount, against a fresh
+                local Inductor cache. Baseline cold-compile cost.
   warmup        Mount $BUCKET RW, compile shapes ${SHAPES[*]}, unmount.
                 Artifacts are uploaded to the bucket.
   consume       Mount $BUCKET overlay, run shapes ${SHAPES[*]}. If warmup ran
-                first, first_call_s drops to a cache hit; otherwise it
-                compiles cold and the new artifacts stay local (bucket
-                unchanged).
-  run-all       Full benchmark: cold consume (empty bucket) + warmup +
-                warm consume (cache-hit). Prints a cold-vs-warm summary
-                from results-consume-cold.json and results-consume-warm.json.
+                first (or another producer populated the bucket subtree),
+                first_call_s drops to a cache hit.
+  run-all       Full benchmark: vanilla + warmup + consume. Prints a
+                per-shape vanilla-vs-cached first_call_s summary from
+                results-vanilla.json and results-consume.json.
+                Does NOT touch the bucket beyond what warmup writes.
 
 Utilities:
   teardown      Stop hf-mount via the wrapper (NEVER call umount on NFS).
-  clear-bucket  Delete every file in $BUCKET.
+  clear-bucket  Delete this host's HW_TAG subtree from $BUCKET.
 
 Environment:
   MODEL                $MODEL

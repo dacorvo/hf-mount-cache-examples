@@ -13,12 +13,19 @@ kernels, FX graphs, etc.) to a chosen directory. Pointing it inside an
 
 | Phase    | Mount    | Action                                                 | Bucket effect            |
 |----------|----------|--------------------------------------------------------|--------------------------|
+| vanilla  | —        | Run each shape with a fresh local Inductor cache       | None                     |
 | warmup   | rw       | Compile each shape in `SHAPES`                         | Artifacts uploaded       |
-| consume  | overlay  | Run each shape; cache hit if a prior warmup ran        | Unchanged (local writes) |
+| consume  | overlay  | Run each shape; cache hit if the bucket holds artifacts | Unchanged (local writes) |
 
-The benchmark the example reports is `consume` cold (no cache anywhere)
-versus `consume` warm (bucket pre-populated by `warmup`). `run-all`
-runs both passes and prints the per-shape `first_call_s` comparison.
+The benchmark the example reports is **vanilla** (no hf-mount, cold
+compile from scratch) versus **consume** after **warmup** (hf-mount
+overlay, cache hit from the bucket). `run-all` runs all three phases
+and prints the per-shape `first_call_s` comparison.
+
+`run-all` never deletes bucket content. A pre-existing populated bucket
+makes the comparison more realistic — warmup just re-asserts what's
+already there. Use the standalone `clear-bucket` command when you
+explicitly want to start from an empty subtree.
 
 Overlay matters even on a cache hit: Inductor rewrites a few metadata
 files on every compile call (autotuning `.best_config`, codegen `.py`)
@@ -36,21 +43,21 @@ on first invocation — no manual venv to activate.
 
 ```bash
 ./setup.sh        # one-time: install hf-mount + uv
-./run.sh run-all  # cold consume + warmup + warm consume, prints summary
+./run.sh run-all  # vanilla + warmup + consume, prints summary
 ```
 
-`run-all` is the headline command: it clears the bucket, runs `consume`
-cold (no cache anywhere) for the baseline, then runs `warmup` followed
-by a second `consume` (warm — should cache-hit from the bucket), and
-prints a per-shape `cold_first_s` vs `warm_first_s` table.
+`run-all` is the headline command: it runs `vanilla` for the no-cache
+baseline, then `warmup` to populate the bucket, then `consume` to
+read it back through an overlay mount. It prints a per-shape
+`vanilla_s` vs `cached_s` table.
 
-Individual commands also work: `warmup`, `consume`, `teardown`,
-`clear-bucket`. Each phase writes a JSON report under `logs/` —
-`results-warmup.json`, `results-consume.json` (or, under `run-all`,
-`results-consume-cold.json` and `results-consume-warm.json`) — with
-per-shape first-call and second-call timings plus `cache_files_added`
-(a real cache hit writes only a handful of metadata files, a miss
-writes hundreds).
+Individual commands also work: `vanilla`, `warmup`, `consume`,
+`teardown`, `clear-bucket`. Each phase writes a JSON report under
+`logs/` (`results-vanilla.json`, `results-warmup.json`,
+`results-consume.json`) with per-shape first-call and second-call
+timings plus `cache_files_added` — a real cache hit writes only a
+handful of metadata files (autotuning `.best_config`, codegen `.py`);
+a miss writes hundreds of Triton kernels, FX graphs, etc.
 
 ## Configuration
 
