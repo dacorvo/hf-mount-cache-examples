@@ -30,7 +30,7 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export BUCKET="${BUCKET:-dacorvo/torch-compile-cache}"
 export MOUNT_POINT="${MOUNT_POINT:-/tmp/hf-mount-torch-compile}"
 export HF_MOUNT_CACHE_DIR="${HF_MOUNT_CACHE_DIR:-/tmp/hf-mount-cache-torch-compile}"
-export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || echo "$HOME/.local/bin/hf-mount")}"
+export HF_MOUNT_BIN="${HF_MOUNT_BIN:-$(command -v hf-mount || true)}"
 export LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
 export TORCHINDUCTOR_CACHE_DIR="$MOUNT_POINT/inductor"
 
@@ -63,7 +63,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 # system and requires a reboot. See AGENTS.md.
 start_hf_mount() {
   local mode="$1"  # rw | overlay
-  [ -x "$HF_MOUNT_BIN" ] || die "Binary not found at $HF_MOUNT_BIN — run ./setup.sh first"
+  [ -n "$HF_MOUNT_BIN" ] && [ -x "$HF_MOUNT_BIN" ] || die "hf-mount not found on PATH — run ./setup.sh or 'brew install hf-mount'"
   [ -n "${HF_TOKEN:-}" ] || die "HF_TOKEN is not set"
 
   local extra_arg=""

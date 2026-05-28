@@ -23,6 +23,11 @@ the bucket stays pristine.
 
 ## Running
 
+Prerequisites: [Homebrew](https://brew.sh) (used by `setup.sh` to install
+`hf-mount` — available on Linux and macOS) and, on Debian/Ubuntu,
+`sudo` for the apt-get step in `setup.sh`. `HF_TOKEN` must be exported
+and have write access to the bucket.
+
 ```bash
 ./setup.sh                       # one-time: install hf-mount + venv + torch
 source ../.venv/bin/activate
@@ -31,7 +36,6 @@ source ../.venv/bin/activate
 ```
 
 Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
-`HF_TOKEN` must be exported and have write access to the bucket.
 
 Each phase writes a JSON report (`results-warmup.json`,
 `results-consume.json`) to `LOG_DIR` with per-shape first-call and

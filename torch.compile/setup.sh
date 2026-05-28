@@ -3,8 +3,9 @@
 # Self-contained setup for the torch.compile + hf-mount integration test.
 #
 # Installs:
-#   1. System deps (nfs-common, python3-dev)
-#   2. hf-mount from the latest GitHub release
+#   1. System deps via apt-get on Debian/Ubuntu (skipped on macOS, where
+#      NFS is built in)
+#   2. hf-mount via Homebrew (homebrew-core has bottles for macOS and Linux)
 #   3. uv + a Python venv at ../.venv
 #   4. torch + transformers + accelerate into the venv
 #
@@ -17,44 +18,25 @@ VENV_DIR="${VENV_DIR:-$REPO_ROOT/.venv}"
 log()  { echo "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
-# ── 1. System dependencies ───────────────────────────────────────────
+# ── 1. System dependencies (Linux only) ──────────────────────────────
 
-log "Installing system dependencies..."
-sudo apt-get update -qq
-sudo apt-get install -y -qq nfs-common python3-dev
+if [[ "$(uname -s)" == "Linux" ]]; then
+  command -v apt-get >/dev/null || die "apt-get not found — this script assumes a Debian/Ubuntu host on Linux."
+  log "Installing system dependencies (nfs-common, python3-dev)..."
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq nfs-common python3-dev
+else
+  log "Non-Linux host ($(uname -s)) — skipping apt-get (NFS client is built in)."
+fi
 
-# ── 2. hf-mount ──────────────────────────────────────────────────────
-
-HF_MOUNT_INSTALL_DIR="${HF_MOUNT_INSTALL_DIR:-$HOME/.local/bin}"
-HF_MOUNT_REPO="huggingface/hf-mount"
-
-install_hf_mount() {
-  local arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64)        arch="x86_64" ;;
-    aarch64|arm64) arch="aarch64" ;;
-    *) die "Unsupported architecture: $arch" ;;
-  esac
-
-  local base_url="https://github.com/${HF_MOUNT_REPO}/releases/latest/download"
-  mkdir -p "$HF_MOUNT_INSTALL_DIR"
-
-  for bin in hf-mount hf-mount-nfs hf-mount-fuse; do
-    local asset="${bin}-${arch}-linux"
-    log "  Downloading ${asset}..."
-    curl -fSL "${base_url}/${asset}" -o "${HF_MOUNT_INSTALL_DIR}/${bin}"
-    chmod +x "${HF_MOUNT_INSTALL_DIR}/${bin}"
-  done
-}
+# ── 2. hf-mount via Homebrew ─────────────────────────────────────────
 
 if command -v hf-mount &>/dev/null; then
   log "hf-mount already installed: $(command -v hf-mount)"
 else
-  log "Installing hf-mount from GitHub releases..."
-  install_hf_mount
-  export PATH="$HF_MOUNT_INSTALL_DIR:$PATH"
-  log "hf-mount installed to $HF_MOUNT_INSTALL_DIR/"
+  command -v brew &>/dev/null || die "brew not found — install Homebrew first (https://brew.sh) then re-run."
+  log "Installing hf-mount via Homebrew..."
+  brew install hf-mount
 fi
 
 # ── 3. Python venv with uv ───────────────────────────────────────────
@@ -80,7 +62,7 @@ cat <<EOF
 ============================================================
   torch.compile setup complete
 ============================================================
-  hf-mount:    $(command -v hf-mount || echo $HF_MOUNT_INSTALL_DIR/hf-mount)
+  hf-mount:    $(command -v hf-mount)
   Python venv: $VENV_DIR
 
   Run the test:
