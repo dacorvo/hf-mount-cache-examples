@@ -48,7 +48,7 @@ only a handful of metadata files (autotuning `.best_config`, codegen
 
 | Variable             | Default                              |
 |----------------------|--------------------------------------|
-| `MODEL`              | `google/gemma-4-E4B-it`              |
+| `MODEL`              | `HuggingFaceTB/SmolLM2-135M-Instruct` |
 | `DTYPE`              | `bfloat16`                           |
 | `BUCKET`             | `dacorvo/torch-compile-cache`        |
 
@@ -75,9 +75,7 @@ per-op `.json` and `.best_config`.
 No Inductor flag (`bundle_triton_into_fx_graph_cache`,
 `bundled_autotune_remote_cache`, `fx_graph_remote_cache`,
 `autotune_remote_cache`) reduces the per-kernel file count that hits
-the file-based cache dir. The remote-cache path is a separate channel
-that routes to Redis in OSS and bypasses `TORCHINDUCTOR_CACHE_DIR`
-entirely.
+the file-based cache dir.
 
 ### 2. Per-file overhead is the bottleneck
 
@@ -94,23 +92,3 @@ path takes long enough that cold consumers can be barely faster than a
 fresh compile (Llama-3.2-3B: 192 s fresh compile vs 166 s cold-xet
 fetch on the same payload), and cold downloads have a long tail of
 multi-minute stalls.
-
-### When this pattern earns its keep
-
-The bucket + overlay model wins when **each cached artifact is large
-and expensive to produce** — per-file overhead becomes negligible
-against per-artifact compute. Examples: AWS Neuron NEFFs, TensorRT
-engines, quantized model weights (GPTQ / AWQ), AOTInductor `.so`
-bundles. The torch.compile JIT cache (small files, modest per-file
-compute) is the wrong shape.
-
-## Files
-
-```
-torch.compile/
-  setup.sh           # install torch + transformers into the shared venv
-  run.sh             # phase orchestrator (warmup / consume / teardown)
-  compile_run.py     # load + torch.compile + time generate across shapes
-  README.md          # this file
-  logs/              # JSON results, bucket snapshots, hf-mount logs (gitignored)
-```

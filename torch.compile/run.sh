@@ -18,7 +18,7 @@ command -v uv >/dev/null || { echo "ERROR: uv not found — run ./setup.sh first
 
 # ── Configuration ────────────────────────────────────────────────────
 
-export MODEL="${MODEL:-google/gemma-4-E4B-it}"
+export MODEL="${MODEL:-HuggingFaceTB/SmolLM2-135M-Instruct}"
 export DTYPE="${DTYPE:-bfloat16}"
 # Single-GPU only — device_map="auto" + accelerate hooks break torch.compile's
 # fullgraph=True requirement (hooks call torch.compiler.disable).
