@@ -16,10 +16,9 @@ kernels, FX graphs, etc.) to a chosen directory. Pointing it inside an
 | warmup   | rw       | Compile each shape in `SHAPES`                         | Artifacts uploaded       |
 | consume  | overlay  | Run each shape; cache hit if a prior warmup ran        | Unchanged (local writes) |
 
-The scenario the example exercises is `warmup + consume` (consumer
-hits the bucket cache, fast first call) versus `consume alone`
-(consumer compiles cold, slow first call). Compare
-`results-consume.json`'s `first_call_s` between the two runs.
+The benchmark the example reports is `consume` cold (no cache anywhere)
+versus `consume` warm (bucket pre-populated by `warmup`). `run-all`
+runs both passes and prints the per-shape `first_call_s` comparison.
 
 Overlay matters even on a cache hit: Inductor rewrites a few metadata
 files on every compile call (autotuning `.best_config`, codegen `.py`)
@@ -36,24 +35,22 @@ declared inline in `compile_run.py` (PEP 723) and resolved by `uv run`
 on first invocation — no manual venv to activate.
 
 ```bash
-./setup.sh                       # one-time: install hf-mount + uv
-
-# Cold consume (no warmup): measure the bare compile cost.
-./run.sh clear-bucket
-./run.sh consume
-
-# Warm consume: warmup populates the bucket, consume hits it.
-./run.sh clear-bucket
-./run.sh run-all                 # warmup + consume
+./setup.sh        # one-time: install hf-mount + uv
+./run.sh run-all  # cold consume + warmup + warm consume, prints summary
 ```
 
-Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
+`run-all` is the headline command: it clears the bucket, runs `consume`
+cold (no cache anywhere) for the baseline, then runs `warmup` followed
+by a second `consume` (warm — should cache-hit from the bucket), and
+prints a per-shape `cold_first_s` vs `warm_first_s` table.
 
-Each phase writes a JSON report (`results-warmup.json`,
-`results-consume.json`) under `logs/` with per-shape first-call and
-second-call timings plus `cache_files_added` — a real cache hit writes
-only a handful of metadata files (autotuning `.best_config`, codegen
-`.py`); a miss writes hundreds of Triton kernels, FX graphs, etc.
+Individual commands also work: `warmup`, `consume`, `teardown`,
+`clear-bucket`. Each phase writes a JSON report under `logs/` —
+`results-warmup.json`, `results-consume.json` (or, under `run-all`,
+`results-consume-cold.json` and `results-consume-warm.json`) — with
+per-shape first-call and second-call timings plus `cache_files_added`
+(a real cache hit writes only a handful of metadata files, a miss
+writes hundreds).
 
 ## Configuration
 
