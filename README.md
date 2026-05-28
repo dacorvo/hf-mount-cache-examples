@@ -42,5 +42,6 @@ access is required for consumers.
 | Directory                                          | Cache type             | Stack                                  |
 |----------------------------------------------------|------------------------|----------------------------------------|
 | [`torch.compile/`](torch.compile/)                 | Inductor on-disk cache | PyTorch + transformers (CausalLM)      |
+| [`neuron/`](neuron/)                               | NEFF on-disk cache     | AWS Neuron + transformers (CausalLM)   |
 
 Each subdirectory has its own README detailing its specifics.
