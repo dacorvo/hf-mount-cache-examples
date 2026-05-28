@@ -13,12 +13,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/../.venv}"
 
-if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-  [[ -d "$VENV_DIR" ]] || { echo "ERROR: Venv not found at $VENV_DIR — run the root setup.sh first" >&2; exit 1; }
-  source "$VENV_DIR/bin/activate"
-fi
+command -v uv >/dev/null || { echo "ERROR: uv not found — run ./setup.sh first" >&2; exit 1; }
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -127,7 +123,7 @@ cmd_warmup() {
   local args=(--model "$MODEL" --dtype "$DTYPE" --output "$LOG_DIR/results-warmup.json" --phase warmup)
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
 
-  python3 "$SCRIPT_DIR/compile_run.py" "${args[@]}"
+  uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 
   log "Letting hf-mount flush queued uploads..."
   sleep 5
@@ -155,7 +151,7 @@ cmd_consume() {
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
   for s in "${SHAPES_RECOMPILE[@]}"; do args+=(--shape "$s"); done
 
-  python3 "$SCRIPT_DIR/compile_run.py" "${args[@]}"
+  uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
 
   stop_hf_mount
   trap - EXIT

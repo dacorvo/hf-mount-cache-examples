@@ -85,13 +85,15 @@ count and tanks bucket-sync time. See "Caveats" in
 ## Running
 
 ```bash
-cd torch.compile && ./setup.sh                  # one-time
-source ../.venv/bin/activate
+cd torch.compile && ./setup.sh         # one-time: install hf-mount + uv
 ./run.sh clear-bucket                  # optional clean slate
 ./run.sh run-all                       # warmup + consume
 ```
 
 Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
+
+`compile_run.py` declares its Python deps inline (PEP 723); `run.sh`
+invokes it via `uv run`, so there is no project venv to activate.
 
 ## Repo layout
 
@@ -99,10 +101,9 @@ Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
 hf-mount-cache-examples/
 ├── README.md
 ├── AGENTS.md                # this file
-├── torch.compile/
-│   ├── setup.sh             # installs hf-mount + venv + torch/transformers
-│   ├── run.sh               # CLI: warmup / consume / teardown
-│   ├── compile_run.py       # load model, torch.compile, generate, time it
-│   └── README.md
-└── .venv/                   # shared Python venv (../.venv from torch.compile)
+└── torch.compile/
+    ├── setup.sh             # installs hf-mount + uv
+    ├── run.sh               # CLI: warmup / consume / teardown
+    ├── compile_run.py       # load model, torch.compile, generate, time it
+    └── README.md
 ```

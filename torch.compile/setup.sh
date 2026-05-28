@@ -6,14 +6,10 @@
 #   1. System deps via apt-get on Debian/Ubuntu (skipped on macOS, where
 #      NFS is built in)
 #   2. hf-mount via Homebrew (homebrew-core has bottles for macOS and Linux)
-#   3. uv + a Python venv at ../.venv
-#   4. torch + transformers + accelerate into the venv
+#   3. uv — compile_run.py declares its Python deps inline (PEP 723),
+#      so 'uv run' resolves torch + transformers on first invocation
 #
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VENV_DIR="${VENV_DIR:-$REPO_ROOT/.venv}"
 
 log()  { echo "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
@@ -39,7 +35,7 @@ else
   brew install hf-mount
 fi
 
-# ── 3. Python venv with uv ───────────────────────────────────────────
+# ── 3. uv ────────────────────────────────────────────────────────────
 
 if ! command -v uv &>/dev/null; then
   log "Installing uv..."
@@ -48,25 +44,15 @@ if ! command -v uv &>/dev/null; then
 fi
 command -v uv &>/dev/null || die "uv not found after install"
 
-log "Creating venv at $VENV_DIR..."
-uv venv "$VENV_DIR" --allow-existing
-source "$VENV_DIR/bin/activate"
-
-# ── 4. Python deps ───────────────────────────────────────────────────
-
-log "Installing torch + transformers + accelerate..."
-uv pip install "torch>=2.4" "transformers>=4.45" "accelerate"
-
 cat <<EOF
 
 ============================================================
   torch.compile setup complete
 ============================================================
   hf-mount:    $(command -v hf-mount)
-  Python venv: $VENV_DIR
+  uv:          $(command -v uv)
 
   Run the test:
-    source $VENV_DIR/bin/activate
     ./run.sh run-all
 ============================================================
 EOF

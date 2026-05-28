@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "torch>=2.4",
+#   "transformers>=4.45",
+#   "accelerate",
+# ]
+# ///
 """
 Load a causal LM, compile it via the transformers static-cache path, and run
 `model.generate()` for each requested shape. Reports per-shape wall-clock time
@@ -20,7 +28,7 @@ actually fires (input_len must be larger than the largest chunk size).
 
 Usage
 -----
-  compile_run.py --model google/gemma-4-E4B-it \
+  uv run compile_run.py --model google/gemma-4-E4B-it \
       --shape 1x64 --shape 1x128 --shape 1x256 \
       --output /tmp/results.json --phase warmup
 """

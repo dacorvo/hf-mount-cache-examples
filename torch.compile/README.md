@@ -23,14 +23,15 @@ the bucket stays pristine.
 
 ## Running
 
-Prerequisites: [Homebrew](https://brew.sh) (used by `setup.sh` to install
-`hf-mount` — available on Linux and macOS) and, on Debian/Ubuntu,
-`sudo` for the apt-get step in `setup.sh`. `HF_TOKEN` must be exported
-and have write access to the bucket.
+Prerequisites: [Homebrew](https://brew.sh) (`setup.sh` uses it to
+install `hf-mount` — bottled for both Linux and macOS) and, on
+Debian/Ubuntu, `sudo` for the apt-get step. `HF_TOKEN` must be
+exported and have write access to the bucket. Python dependencies are
+declared inline in `compile_run.py` (PEP 723) and resolved by `uv run`
+on first invocation — no manual venv to activate.
 
 ```bash
-./setup.sh                       # one-time: install hf-mount + venv + torch
-source ../.venv/bin/activate
+./setup.sh                       # one-time: install hf-mount + uv
 ./run.sh clear-bucket            # optional clean slate
 ./run.sh run-all                 # warmup + consume
 ```
