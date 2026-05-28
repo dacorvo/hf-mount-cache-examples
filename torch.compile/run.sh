@@ -57,6 +57,33 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 
 # ── hf-mount lifecycle ───────────────────────────────────────────────
 
+# Cross-platform check for an active mount at $MOUNT_POINT.
+#   Linux: /proc/mounts is the source of truth.
+#   macOS: no /proc, and the kernel resolves /tmp -> /private/tmp, so we have
+#          to compare the resolved path against `mount` output.
+is_mounted() {
+  if [ -r /proc/mounts ]; then
+    grep -q " $MOUNT_POINT " /proc/mounts
+  else
+    local resolved
+    resolved="$(cd "$MOUNT_POINT" 2>/dev/null && pwd -P)" || return 1
+    mount | grep -q " on $resolved "
+  fi
+}
+
+# Stop any hf-mount daemon currently attached to $MOUNT_POINT. MUST run before
+# any rm/ls/find/stat on the mount path — those operations block forever on a
+# live NFS mount whose daemon we're about to replace. Always go through the
+# wrapper; NEVER umount the path or kill the backend directly (both leave a
+# phantom mount that requires reboot — see AGENTS.md).
+ensure_unmounted() {
+  if is_mounted; then
+    log "Previous mount detected at $MOUNT_POINT — stopping via hf-mount wrapper"
+    hf-mount stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || \
+      die "hf-mount stop failed — check $LOG_DIR/hf-mount.log"
+  fi
+}
+
 # Lifecycle goes through the `hf-mount` wrapper — `hf-mount start` daemonizes
 # the backend, `hf-mount stop` performs a coordinated unmount. NEVER call
 # umount on the mount point and NEVER kill the backend (hf-mount-nfs /
@@ -79,13 +106,6 @@ start_hf_mount() {
 
   mkdir -p "$MOUNT_POINT"
 
-  # If a previous daemon is still attached to this mount point, stop it
-  # through the wrapper. NEVER `kill` the backend or `umount` the path.
-  if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
-    log "Previous mount detected at $MOUNT_POINT — stopping via hf-mount wrapper"
-    hf-mount stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || true
-  fi
-
   log "Starting hf-mount daemon: $BUCKET at $MOUNT_POINT (mode=$mode)"
   RUST_LOG=hf_mount=info \
     hf-mount start -- \
@@ -95,7 +115,7 @@ start_hf_mount() {
       >> "$LOG_DIR/hf-mount.log" 2>&1
 
   for i in $(seq 1 30); do
-    if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
+    if is_mounted; then
       log "Mount ready after ${i}s"
       return 0
     fi
@@ -107,7 +127,7 @@ start_hf_mount() {
 stop_hf_mount() {
   # Always go through the wrapper. NEVER `kill` the backend; that leaves a
   # phantom NFS mount that requires reboot to recover from.
-  if grep -q " $MOUNT_POINT " /proc/mounts 2>/dev/null; then
+  if is_mounted; then
     log "Stopping hf-mount daemon for $MOUNT_POINT (coordinated unmount)"
     hf-mount stop "$MOUNT_POINT" >> "$LOG_DIR/hf-mount.log" 2>&1 || \
       log "WARNING: hf-mount stop reported an error — check $LOG_DIR/hf-mount.log"
@@ -119,6 +139,8 @@ stop_hf_mount() {
 cmd_warmup() {
   log "====== Phase: warmup (RW mount, populate bucket) ======"
 
+  # Stop any stale daemon FIRST — rm/ls on a live NFS mount hangs forever.
+  ensure_unmounted
   # Start from a clean mount point so the RW mount has nothing stale under it.
   rm -rf "$MOUNT_POINT"
 
@@ -149,6 +171,8 @@ cmd_consume() {
 
   log "====== Phase: consume (overlay mount, cache hit if bucket warmed) ======"
 
+  # Stop any stale daemon FIRST — rm/ls on a live NFS mount hangs forever.
+  ensure_unmounted
   # Keep the mount point empty for a clean overlay layer.
   log "Clearing mount point"
   rm -rf "$MOUNT_POINT"
@@ -190,6 +214,11 @@ EOF
 }
 
 cmd_run_all() {
+  # Start with a clean logs/ dir so one run-all == one self-contained log set.
+  # Single-phase invocations (./run.sh warmup, etc.) still append to whatever
+  # is there, so manual sequences keep their history.
+  rm -rf "$LOG_DIR" && mkdir -p "$LOG_DIR"
+
   log "====== Cold pass: consume against an empty bucket ======"
   cmd_clear_bucket
   cmd_consume cold
