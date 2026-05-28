@@ -1,129 +1,113 @@
 # torch.compile + hf-mount Integration Test
 
-Verifies that `torch.compile`'s on-disk Inductor cache can be shared
-across machines through an HF Bucket mounted with `hf-mount`, and that
-the **overlay** mode lets consumers reuse the shared cache while keeping
-new compilations local.
+Shares `torch.compile`'s on-disk Inductor cache across machines through
+an HF Bucket mounted with `hf-mount`. Consumers mount the bucket with
+`--overlay` so they read shared artifacts but keep any new compilations
+local.
 
 ## What it does
 
-The `TORCHINDUCTOR_CACHE_DIR` environment variable redirects all
-`torch.compile` artifacts (Triton kernels, FX graphs, etc.) to a
-specific directory. Pointing it inside an `hf-mount`-mounted bucket
-makes those artifacts shared.
+`TORCHINDUCTOR_CACHE_DIR` redirects every Inductor artifact (Triton
+kernels, FX graphs, etc.) to a chosen directory. Pointing it inside an
+`hf-mount` mount makes the cache shared.
 
-Three phases:
+| Phase    | Mount    | Action                                              | Bucket effect            |
+|----------|----------|-----------------------------------------------------|--------------------------|
+| warmup   | rw       | Compile two warmup shapes                           | Artifacts uploaded       |
+| consume  | overlay  | Rerun warmup shapes (cache hit) + compile new shape | Unchanged (local writes) |
 
-| Phase    | Mount    | Action                                             | Bucket effect            |
-|----------|----------|----------------------------------------------------|--------------------------|
-| warmup   | rw       | Compile shapes `1x16`, `1x32`                      | Artifacts uploaded       |
-| consume  | overlay  | Rerun `1x16`, `1x32` (cache hit) + compile `1x64`  | Unchanged (local writes) |
-| verify   | —        | Diff the bucket, check cache-hit timings           | —                        |
+Overlay matters even for cache hits: Inductor rewrites a few metadata
+files on every compile call (autotuning `.best_config`, codegen `.py`)
+even on a perfect on-disk hit. Overlay absorbs those writes locally so
+the bucket stays pristine.
 
-> **Note on the second mount.** The user-facing description says
-> "remount RW", but to verify "the bucket has not been updated and
-> compilation artifacts are stored locally" the second mount must be
-> overlay — RW would upload the new shape's artifacts back to the
-> bucket. The test uses overlay for the consume phase.
-
-> **Why overlay matters even for cache hits.** Inductor rewrites a few
-> metadata files (autotuning `.best_config`, codegen `.py`) on every
-> compile call — even when the on-disk cache is a perfect hit. A
-> read-only mount would fail outright on these writes. A read-write
-> mount would silently push them back to the bucket, creating write
-> contention and potentially overwriting the producer's autotuning
-> results with machine-specific values. Overlay mode absorbs these
-> writes locally, keeping the bucket pristine.
-
-## Prerequisites
-
-NVIDIA GPU with CUDA (or CPU for a slow but functional smoke test),
-Python 3.10+. From the repo root:
+## Running
 
 ```bash
-./setup.sh                       # install hf-mount, venv with vLLM
-source .venv/bin/activate
-cd torch.compile
-./setup.sh                       # install torch + transformers
+./setup.sh                       # one-time: install hf-mount + venv + torch
+source ../.venv/bin/activate
+./run.sh clear-bucket            # optional clean slate
+./run.sh run-all                 # warmup + consume
 ```
 
-`HF_TOKEN` must be exported (or in `~/.cache/huggingface/token`) and
-must have write access to the target bucket.
+Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
+`HF_TOKEN` must be exported and have write access to the bucket.
 
-## Quick start
-
-```bash
-source .venv/bin/activate
-cd torch.compile
-
-# Optional: clear the bucket before a fresh run
-./test-compile.sh clear-bucket
-
-# Run all phases end-to-end
-./test-compile.sh run-all
-
-# Or step through manually
-./test-compile.sh warmup
-./test-compile.sh consume
-./test-compile.sh verify
-```
-
-## How verify decides "cache hit"
-
-The primary signal is **`cache_files_added`** for each shape — the
-number of new files that appeared in `TORCHINDUCTOR_CACHE_DIR` during
-that shape's compile call:
-
-- A real Inductor cache hit writes only a handful of metadata files
-  (autotuning `.best_config`, codegen `.py`).
-- A miss / recompile writes hundreds of new files per shape (Triton
-  kernels, FX graphs, AOTAutograd entries, etc).
-
-Rather than a fixed threshold, verify compares each warmup shape's
-`cache_files_added` against the recompile shape from the same run.
-A hit must add less than 5 % of the recompile file count. This is
-self-calibrating across platforms and torch versions.
-
-First-call latency is shown for context but is **not** used as the
-verdict, because under overlay + NFS the first call also pays for
-lazy-fetching all the cached `.so` / `.cpp` bytes from the bucket.
-On small models that fetch can take roughly as long as a fresh CPU
-recompile, so the latency signal is noisy. The file-count signal is
-unambiguous.
-
-Bucket invariance is checked by listing the bucket via the HF API
-before and after the consume phase and diffing the file lists.
-
-Overlay-local artifacts are captured by listing files under the mount
-point **after** unmount — overlay mode persists local writes at the
-mount point itself, so once the NFS daemon is gone the directory holds
-only the locally-written files (recompile output for the new shape).
+Each phase writes a JSON report (`results-warmup.json`,
+`results-consume.json`) to `LOG_DIR` with per-shape first-call and
+second-call timings plus `cache_files_added` — a real cache hit writes
+only a handful of metadata files (autotuning `.best_config`, codegen
+`.py`); a miss writes hundreds of Triton kernels, FX graphs, etc.
 
 ## Configuration
 
-| Variable             | Default                                     |
-|----------------------|---------------------------------------------|
-| `MODEL`              | `unsloth/Llama-3.2-1B-Instruct`             |
+| Variable             | Default                              |
+|----------------------|--------------------------------------|
+| `MODEL`              | `google/gemma-4-E4B-it`              |
+| `BUCKET`             | `dacorvo/torch-compile-cache`        |
+| `MOUNT_POINT`        | `/tmp/hf-mount-torch-compile`        |
+| `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-torch-compile`  |
+| `LOG_DIR`            | `torch.compile/logs`                 |
 
-For a fast macOS / CPU-only smoke test, override
-`MODEL=HuggingFaceTB/SmolLM2-135M-Instruct`. End-to-end time on Apple
-Silicon CPU is roughly 90 s warmup + 90 s consume.
-| `BUCKET`             | `dacorvo/torch-compile-cache`               |
-| `MOUNT_POINT`        | `/tmp/hf-mount-torch-compile`               |
-| `HF_MOUNT_CACHE_DIR` | `/tmp/hf-mount-cache-torch-compile`         |
-| `HF_MOUNT_BIN`       | `~/.local/bin/hf-mount` (the wrapper)       |
-| `LOG_DIR`            | `torch.compile/logs`                        |
+Shape sets (`SHAPES_WARMUP`, `SHAPES_RECOMPILE`) are at the top of
+`run.sh`.
 
-To change the input shapes, edit `SHAPES_WARMUP` and `SHAPES_RECOMPILE`
-near the top of `test-compile.sh`.
+## Caveats
+
+This example demonstrates the mechanism end-to-end (overlay semantics,
+bucket invariance, recompile isolation), but the Inductor JIT cache's
+file profile does not flatter the bucket-sync path. Two effects to
+know about before generalizing the pattern to other workloads:
+
+### 1. Compile mode dramatically changes file count
+
+The example uses transformers' default compile mode. Switching to
+`max-autotune-no-cudagraphs` or `max-autotune` makes Inductor emit
+many additional autotuning variants — measured cache for
+`gemma-4-E4B-it` with `max-autotune-no-cudagraphs` + chunked prefill +
+one warmup shape: **5,520 files, median 8 KB**. Most are debug/hygiene
+IR siblings (`.source / .ttir / .ttgir / .llir / .ptx / .cubin`) plus
+per-op `.json` and `.best_config`.
+
+No Inductor flag (`bundle_triton_into_fx_graph_cache`,
+`bundled_autotune_remote_cache`, `fx_graph_remote_cache`,
+`autotune_remote_cache`) reduces the per-kernel file count that hits
+the file-based cache dir. The remote-cache path is a separate channel
+that routes to Redis in OSS and bypasses `TORCHINDUCTOR_CACHE_DIR`
+entirely.
+
+### 2. Per-file overhead is the bottleneck
+
+Bucket access cost is dominated by the per-file metadata roundtrip:
+
+| Access path                                                       | Rate                  |
+|-------------------------------------------------------------------|-----------------------|
+| Producer-through-mount upload (`--advanced-writes`)               | ~7 files/sec          |
+| Direct API upload (`HfApi.sync_bucket`)                           | ~51 files/sec         |
+| Direct API download (`HfApi.sync_bucket`, cold xet)               | ~16 files/sec (noisy) |
+
+For a workload that emits thousands of small files, the producer-mount
+path takes long enough that cold consumers can be barely faster than a
+fresh compile (Llama-3.2-3B: 192 s fresh compile vs 166 s cold-xet
+fetch on the same payload), and cold downloads have a long tail of
+multi-minute stalls.
+
+### When this pattern earns its keep
+
+The bucket + overlay model wins when **each cached artifact is large
+and expensive to produce** — per-file overhead becomes negligible
+against per-artifact compute. Examples: AWS Neuron NEFFs, TensorRT
+engines, quantized model weights (GPTQ / AWQ), AOTInductor `.so`
+bundles. The torch.compile JIT cache (small files, modest per-file
+compute) is the wrong shape.
 
 ## Files
 
 ```
 torch.compile/
-  setup.sh           # install torch + transformers in the shared venv
-  test-compile.sh    # phase orchestrator (warmup / consume / verify / teardown)
-  compile_run.py     # load + torch.compile + time forward passes across shapes
+  setup.sh           # install torch + transformers into the shared venv
+  run.sh             # phase orchestrator (warmup / consume / teardown)
+  compile_run.py     # load + torch.compile + time generate across shapes
   README.md          # this file
   logs/              # JSON results, bucket snapshots, hf-mount logs (gitignored)
 ```

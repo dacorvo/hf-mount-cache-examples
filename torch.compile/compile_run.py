@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, CompileConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 # Fixed max_new_tokens — decode kernels are shape-flexible across cache_len,
@@ -103,15 +103,12 @@ def main():
     t_load = time.perf_counter() - t_load0
     print(f"[compile_run] Model loaded in {t_load:.2f}s", flush=True)
 
-    # Compile-friendly path: static KV cache triggers transformers' automatic
-    # compile in generate. Default compile mode is "reduce-overhead" which uses
-    # CUDA Graphs — that fails with chunked prefill ("accessing tensor output of
-    # CUDAGraphs that has been overwritten by a subsequent run") because chunks
-    # share a single output buffer. We override with max-autotune-no-cudagraphs
-    # to keep the heavy autotuning work (substantial cache content) without
-    # CUDA Graphs' lifetime constraint.
+    # Static KV cache triggers transformers' automatic compile in generate.
+    # We use transformers' default compile mode (reduce-overhead). Other modes
+    # such as max-autotune emit thousands of additional Inductor artifacts,
+    # which inflate bucket-sync time well past what the cache buys back. See
+    # the "Caveats" section in README.md.
     model.generation_config.cache_implementation = "static"
-    model.generation_config.compile_config = CompileConfig(mode="max-autotune-no-cudagraphs")
 
     # Prepare a fixed-content prompt of args.input_len tokens. Content doesn't
     # matter; shape does.

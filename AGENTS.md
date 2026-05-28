@@ -62,7 +62,6 @@ starts on the consumer side skip the compile.
 |-----------|---------------------------------------------|--------------------------------------------|
 | `warmup`  | `--advanced-writes` (RW, async batched flush) | Populate the bucket                        |
 | `consume` | `--overlay` (implies `--advanced-writes`)     | Lazy-fetch from bucket; writes stay local  |
-| `verify`  | —                                           | Bucket invariance + cache-hit check        |
 
 `--advanced-writes` is **required** for the producer (warmup). Without
 it, hf-mount runs append-only with synchronous close: every Inductor
@@ -74,28 +73,25 @@ cache-file close blocks on upload, and warmup hangs for hours.
 
 ```python
 model.generation_config.cache_implementation = "static"
-model.generation_config.compile_config = CompileConfig(
-    mode="max-autotune-no-cudagraphs"
-)
 model.generate(input_ids, cache_implementation="static", ...)
 ```
 
-Setting `cache_implementation="static"` is what triggers
-transformers' automatic compile. The override on `compile_config`
-avoids CUDA Graphs, which conflict with chunked prefill (shared
-output buffer overwritten across chunks).
+Setting `cache_implementation="static"` is what triggers transformers'
+automatic compile. We rely on transformers' default compile mode —
+swapping to `max-autotune` variants explodes the Inductor artifact
+count and tanks bucket-sync time. See "Caveats" in
+[torch.compile/README.md](torch.compile/README.md).
 
 ## Running
 
 ```bash
 cd torch.compile && ./setup.sh                  # one-time
 source ../.venv/bin/activate
-./test-compile.sh clear-bucket                  # optional clean slate
-./test-compile.sh run-all                       # warmup + consume + verify
+./run.sh clear-bucket                  # optional clean slate
+./run.sh run-all                       # warmup + consume
 ```
 
-Individual phases: `warmup`, `consume`, `verify`, `teardown`,
-`clear-bucket`, `clean-local`.
+Individual commands: `warmup`, `consume`, `teardown`, `clear-bucket`.
 
 ## Repo layout
 
@@ -105,7 +101,7 @@ hf-mount-cache-examples/
 ├── AGENTS.md                # this file
 ├── torch.compile/
 │   ├── setup.sh             # installs hf-mount + venv + torch/transformers
-│   ├── test-compile.sh      # CLI: warmup / consume / verify / teardown
+│   ├── run.sh               # CLI: warmup / consume / teardown
 │   ├── compile_run.py       # load model, torch.compile, generate, time it
 │   └── README.md
 └── .venv/                   # shared Python venv (../.venv from torch.compile)

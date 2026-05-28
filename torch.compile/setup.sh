@@ -85,6 +85,6 @@ cat <<EOF
 
   Run the test:
     source $VENV_DIR/bin/activate
-    ./test-compile.sh run-all
+    ./run.sh run-all
 ============================================================
 EOF
