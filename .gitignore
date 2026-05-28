@@ -2,4 +2,5 @@
 .claude/
 torch.compile/logs/
 torch.compile/experiments/
+neuron/logs/
 __pycache__/
