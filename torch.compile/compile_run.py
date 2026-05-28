@@ -80,7 +80,6 @@ def main():
     ap.add_argument("--shape", action="append", required=True,
                     help="Input shape as BxC (batch x prefill_chunk_size). Repeat to test multiple.")
     ap.add_argument("--output", required=True, help="JSON results file.")
-    ap.add_argument("--dtype", default="bfloat16", choices=["float16", "bfloat16", "float32"])
     ap.add_argument("--device", default=None, help="cuda / cpu (auto-detect if unset)")
     ap.add_argument("--phase", default="", help="Free-form phase label for the report.")
     ap.add_argument("--input-len", type=int, default=512,
@@ -91,12 +90,7 @@ def main():
     print(f"[compile_run] TORCHINDUCTOR_CACHE_DIR = {cache_dir}", flush=True)
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
-    if device == "cpu" and dtype == torch.float16:
-        dtype = torch.float32
-        print("[compile_run] CPU detected — falling back to float32", flush=True)
-
-    print(f"[compile_run] device={device} dtype={dtype} model={args.model}", flush=True)
+    print(f"[compile_run] device={device} model={args.model}", flush=True)
 
     tok = AutoTokenizer.from_pretrained(args.model)
     if tok.pad_token_id is None:
@@ -105,9 +99,9 @@ def main():
     print("[compile_run] Loading model...", flush=True)
     t_load0 = time.perf_counter()
     if device == "cuda" and torch.cuda.device_count() > 1:
-        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, device_map="auto").eval()
+        model = AutoModelForCausalLM.from_pretrained(args.model, device_map="auto").eval()
     else:
-        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype).to(device).eval()
+        model = AutoModelForCausalLM.from_pretrained(args.model).to(device).eval()
     t_load = time.perf_counter() - t_load0
     print(f"[compile_run] Model loaded in {t_load:.2f}s", flush=True)
 
@@ -183,7 +177,6 @@ def main():
         "phase": args.phase,
         "model": args.model,
         "device": device,
-        "dtype": str(dtype),
         "cache_dir": cache_dir,
         "cache_files_total": cache_files,
         "cache_size_total": cache_size,

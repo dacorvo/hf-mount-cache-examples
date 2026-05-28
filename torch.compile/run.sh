@@ -19,7 +19,6 @@ command -v uv >/dev/null || { echo "ERROR: uv not found — run ./setup.sh first
 # ── Configuration ────────────────────────────────────────────────────
 
 export MODEL="${MODEL:-HuggingFaceTB/SmolLM2-135M-Instruct}"
-export DTYPE="${DTYPE:-bfloat16}"
 # Single-GPU only — device_map="auto" + accelerate hooks break torch.compile's
 # fullgraph=True requirement (hooks call torch.compiler.disable).
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
@@ -128,7 +127,7 @@ cmd_warmup() {
 
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
-  local args=(--model "$MODEL" --dtype "$DTYPE" --output "$LOG_DIR/results-warmup.json" --phase warmup)
+  local args=(--model "$MODEL" --output "$LOG_DIR/results-warmup.json" --phase warmup)
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
 
   uv run "$SCRIPT_DIR/compile_run.py" "${args[@]}"
@@ -153,7 +152,7 @@ cmd_consume() {
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
   # Re-run warmup shapes (expect cache hits via bucket) + recompile shapes.
-  local args=(--model "$MODEL" --dtype "$DTYPE" --output "$LOG_DIR/results-consume.json" --phase consume)
+  local args=(--model "$MODEL" --output "$LOG_DIR/results-consume.json" --phase consume)
   for s in "${SHAPES_WARMUP[@]}"; do args+=(--shape "$s"); done
   for s in "${SHAPES_RECOMPILE[@]}"; do args+=(--shape "$s"); done
 
@@ -216,7 +215,6 @@ Utilities:
 
 Environment:
   MODEL                $MODEL
-  DTYPE                $DTYPE
   BUCKET               $BUCKET
 EOF
     ;;

@@ -49,7 +49,6 @@ only a handful of metadata files (autotuning `.best_config`, codegen
 | Variable             | Default                              |
 |----------------------|--------------------------------------|
 | `MODEL`              | `HuggingFaceTB/SmolLM2-135M-Instruct` |
-| `DTYPE`              | `bfloat16`                           |
 | `BUCKET`             | `dacorvo/torch-compile-cache`        |
 
 Shape sets (`SHAPES_WARMUP`, `SHAPES_RECOMPILE`) and the mount/cache
